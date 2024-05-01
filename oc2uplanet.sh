@@ -19,6 +19,7 @@ find ./data -mtime +1 -type f -exec rm '{}' \;
 ## DEFINE TIME
 # Get today's date in the format YYYY-MM-DD
 today=$(date +"%Y-%m-%d")
+yesterday=$(date -d 'yesterday' +'%Y-%m-%d')
 # Get the start and end dates for the current week
 start_of_week=$(date -d "last monday" +"%Y-%m-%d")
 # Get the start and end dates for the current month
@@ -39,50 +40,35 @@ start_of_year=$(date -d "$(date +%Y-01-01)" +"%Y-%m-%d")
 cat data/backers.json \
 | jq -r '.data.account.members.nodes[] | "\(.account.slug):\(.account.emails[0])"' > data/slugemail.list
 
-while read line; do
-    pslug=$(echo $line | cut -d ':' -f 1)
-    pmail=$(echo $line | cut -d ':' -f 2)
-    ## GET DEBIT
-    echo "======================================================"
-    echo "$line"
-    [[ ! -s data/${pmail}.DEBIT.json ]] \
-    && curl -sX POST  -H "Content-Type: application/json"    -H "Content-Personal-Token: ${OCAPIKEY}"   -d '{
-        "query": "query ($slug: String) { account(slug: $slug) { name slug transactions(limit: 50, type: DEBIT) { totalCount nodes { type fromAccount { name slug } amount { value currency } createdAt } } } }",
-        "variables": {
-          "slug": "'${pslug}'"
-        }
-      }'   https://api.opencollective.com/graphql/v2 | jq > data/${pmail}.DEBIT.json
+# SEARCH FOR YESTERDAY CREDIT
+curl -X POST  -H "Content-Type: application/json"    -H "Content-Personal-Token: dedab23fbf01dc62a9b5d894aa696486dc0fe36201dc62a9b5d894aa696486dc0fe362"   -d '{
+    "query": "query ($slug: String) { account(slug: $slug) { name slug transactions(limit: 10, type: CREDIT) { totalCount nodes { type fromAccount { name slug emails } amount { value currency } createdAt } } } }",
+    "variables": {
+      "slug": "'${OCSLUG}'"
+    }
+  }'   https://api.opencollective.com/graphql/v2 \
+    | jq --arg yesterday "$yesterday" '.data.account.transactions.nodes[] | select(.type == "CREDIT" and (.createdAt | startswith($yesterday)))' \
+    > data/yesterday.credit.json
 
-# Function to convert date to Unix timestamp
-date_to_unix() {
-    date -d "$1" +"%s"
-}
+## data/yesterday.credit.json EXEMPLE
+#~ {
+  #~ "type": "CREDIT",
+  #~ "fromAccount": {
+    #~ "name": "Astroport",
+    #~ "slug": "monnaie-libre",
+    #~ "emails": null
+  #~ },
+  #~ "amount": {
+    #~ "value": 259.53,
+    #~ "currency": "EUR"
+  #~ },
+  #~ "createdAt": "2023-02-06T10:15:28.042Z"
+#~ }
 
-# Calculate total for today
-total_today=$(jq -r --arg today "$today" '.data.account.transactions.nodes[] | select(.createdAt | startswith("$today")) | .amount.value' data/${pmail}.DEBIT.json | awk '{s+=$1} END {print s}')
-# Calculate total for this week
-total_week=$(jq -r --arg start "$start_of_week" '.data.account.transactions.nodes[] | select(.createdAt >= $start) | .amount.value' data/${pmail}.DEBIT.json 2>/dev/null | awk '{s+=$1} END {print s}') || 0
-# Calculate total for this month
-total_month=$(jq -r --arg start "$start_of_month" '.data.account.transactions.nodes[] | select(.createdAt >= $start) | .amount.value' data/${pmail}.DEBIT.json 2>/dev/null | awk '{s+=$1} END {print s}') || 0
-# Calculate total for this year
-total_year=$(jq -r --arg start "$start_of_year" '.data.account.transactions.nodes[] | select(.createdAt >= $start) | .amount.value' data/${pmail}.DEBIT.json 2>/dev/null | awk '{s+=$1} END {print s}'  2>/dev/null) || 0
-# Calculate total overall
-# echo "jq -r '.data.account.transactions.nodes[].amount.value' data/${pmail}.DEBIT.json | awk '{s+=\$1} END {print s}'"
-total_overall=$(jq -r '.data.account.transactions.nodes[].amount.value' data/${pmail}.DEBIT.json | awk '{s+=$1} END {print s}' 2>/dev/null)
+cat data/yesterday.credit.json | jq '.fromAccount.slug, .amount.value' > data/bingo.json
 
-last_transaction=$(jq -r '.data.account.transactions.nodes | sort_by(.createdAt) | last' data/${pmail}.DEBIT.json 2>/dev/null)
+## bingo.json !! ?
+# search for UPlanet "email" account
+# and send Zen accordingly
 
-# Print the totals
-echo "Total for $today: $total_today EUR"
-echo "Total from $start_of_week: $total_week EUR"
-echo "Total from $start_of_month: $total_month EUR"
-echo "Total from $start_of_year: $total_year EUR"
-echo "Total overall: $total_overall EUR"
-echo "Details of the last transaction:"
-echo "$last_transaction"
-    echo "---------- cat data/${pmail}.DEBIT.json | jq -r"
-
-    sleep 5
-
-done < data/slugemail.list
-
+## CONTROL WALLET PRIMAL TRANSACTION CONCORDANCE
