@@ -16,33 +16,26 @@ cleanup_on_exit() {
     echo ""
     echo "Script interrupted. Cleaning up..."
     
-    # Save temporary file if it exists and is valid
-    if [[ -f "$TEMP_DIR/prospect_temp.json" ]]; then
-        if jq empty "$TEMP_DIR/prospect_temp.json" 2>/dev/null; then
-            echo "Saving progress from temporary file..."
-            mv "$TEMP_DIR/prospect_temp.json" "$PROSPECT_FILE"
+    # Check if the main file is valid
+    if [[ -f "$PROSPECT_FILE" ]]; then
+        if jq empty "$PROSPECT_FILE" 2>/dev/null; then
             local member_count
             member_count=$(jq '.members | length' "$PROSPECT_FILE" 2>/dev/null || echo "0")
-            echo "Progress saved: $member_count members processed"
+            echo "Database is valid with $member_count members - progress preserved"
         else
-            echo "Temporary file is corrupted, removing it"
-            rm -f "$TEMP_DIR/prospect_temp.json"
+            echo "Database is corrupted, attempting to repair..."
         fi
     fi
     
-    # If the JSON file exists but is incomplete, try to fix it
+    # If the JSON file exists but is corrupted, try to fix it
     if [[ -f "$PROSPECT_FILE" ]]; then
-        echo "Attempting to fix incomplete JSON file..."
+        echo "Checking existing database file..."
         
-        # Create a backup of the corrupted file
-        cp "$PROSPECT_FILE" "$PROSPECT_FILE.backup.$(date +%s)"
-        echo "Created backup of corrupted file"
-        
-        # Try to fix the JSON structure
+        # Try to fix the JSON structure if corrupted
         if jq empty "$PROSPECT_FILE" 2>/dev/null; then
-            echo "JSON is already valid, no fix needed"
+            echo "Existing database is valid"
         else
-            echo "Attempting to repair JSON structure..."
+            echo "Existing database is corrupted, attempting to repair..."
             
             # Try to extract valid members and recreate the file
             if jq -e '.members' "$PROSPECT_FILE" >/dev/null 2>&1; then
@@ -168,20 +161,14 @@ process_all_members() {
     local processed=0
     local new_members=0
     local total_members
-    local temp_file="$TEMP_DIR/prospect_temp.json"
     
     total_members=$(jq '.results | length' "$TEMP_DIR/g1_members_raw.json")
     echo "Total members to process: $total_members"
     
-    # Load existing data or create new structure
-    if [[ -f "$PROSPECT_FILE" ]] && jq empty "$PROSPECT_FILE" 2>/dev/null; then
-        echo "Loading existing database..."
-        cp "$PROSPECT_FILE" "$temp_file"
-        existing_count=$(jq '.members | length' "$temp_file" 2>/dev/null || echo "0")
-        echo "Found $existing_count existing members"
-    else
+    # Initialize or load existing database
+    if [[ ! -f "$PROSPECT_FILE" ]] || [[ ! -s "$PROSPECT_FILE" ]] || ! jq empty "$PROSPECT_FILE" 2>/dev/null; then
         echo "Creating new database structure..."
-        cat > "$temp_file" << EOF
+        cat > "$PROSPECT_FILE" << EOF
 {
   "metadata": {
     "created_date": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
@@ -193,6 +180,9 @@ process_all_members() {
 }
 EOF
         existing_count=0
+    else
+        existing_count=$(jq '.members | length' "$PROSPECT_FILE" 2>/dev/null || echo "0")
+        echo "Found $existing_count existing members"
     fi
     
     # Process each member
@@ -207,7 +197,7 @@ EOF
         echo "Processing member $processed/$total_members: $uid ($pubkey)"
         
         # Check if member already exists
-        if jq -e --arg pk "$pubkey" '.members[] | select(.pubkey == $pk)' "$temp_file" >/dev/null 2>&1; then
+        if jq -e --arg pk "$pubkey" '.members[] | select(.pubkey == $pk)' "$PROSPECT_FILE" >/dev/null 2>&1; then
             echo "Member $uid already exists, skipping..."
             continue
         fi
@@ -232,9 +222,9 @@ EOF
 EOF
 )
         
-        # Add member to temporary file using jq (this ensures JSON validity)
-        jq --argjson member "$new_member" '.members += [$member] | .metadata.updated_date = "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'"' "$temp_file" > "$temp_file.new"
-        mv "$temp_file.new" "$temp_file"
+        # Add member directly to the main file using jq (this ensures JSON validity)
+        jq --argjson member "$new_member" '.members += [$member] | .metadata.updated_date = "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'"' "$PROSPECT_FILE" > "$PROSPECT_FILE.new"
+        mv "$PROSPECT_FILE.new" "$PROSPECT_FILE"
         
         new_members=$((new_members + 1))
         echo "Member $uid added to database"
@@ -248,24 +238,15 @@ EOF
     
     # Update final metadata
     local final_count
-    final_count=$(jq '.members | length' "$temp_file")
+    final_count=$(jq '.members | length' "$PROSPECT_FILE")
     
     # Update the total_members count
-    jq --arg count "$final_count" '.metadata.total_members = ($count | tonumber)' "$temp_file" > "$temp_file.new"
-    mv "$temp_file.new" "$temp_file"
+    jq --arg count "$final_count" '.metadata.total_members = ($count | tonumber)' "$PROSPECT_FILE" > "$PROSPECT_FILE.new"
+    mv "$PROSPECT_FILE.new" "$PROSPECT_FILE"
     
-    # Validate the final JSON before moving to final location
-    if jq empty "$temp_file" 2>/dev/null; then
-        # Move temporary file to final location
-        mv "$temp_file" "$PROSPECT_FILE"
-        echo "Processing complete. New members: $new_members"
-        echo "Prospect database updated: $PROSPECT_FILE"
-        echo "Total members in database: $final_count"
-    else
-        echo "ERROR: Generated JSON is invalid!"
-        rm -f "$temp_file"
-        exit 1
-    fi
+    echo "Processing complete. New members: $new_members"
+    echo "Prospect database updated: $PROSPECT_FILE"
+    echo "Total members in database: $final_count"
 }
 
 # Function to display statistics
