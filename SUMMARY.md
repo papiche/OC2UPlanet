@@ -1,120 +1,87 @@
-# G1 Prospect Database Builder - Résumé
+# Prospect Database Builder - Résumé du Système Unifié
 
-## 🎯 Objectif atteint
+## 🎯 **Objectif atteint : Un système de prospection à double source**
 
-Nous avons créé avec succès un **système de base de données de prospects Ğ1** qui :
+Nous avons créé un **écosystème de prospection avancé** qui unifie les données des deux principales plateformes de la Monnaie Libre : la **Ğ1 (via Cesium)** et **ğchange**. Ce système ne se contente plus de collecter des données, il les **croise et les enrichit mutuellement**.
 
-1. **Récupère** automatiquement les membres Ğ1 depuis l'API WoT
-2. **Enrichit** chaque membre avec ses données de profil Cesium complètes
-3. **Sauvegarde** une base de données structurée dans `~/.zen/game/g1prospect.json`
-4. **Gère** les doublons et les erreurs de manière robuste
+### **Le système accomplit désormais :**
+1.  **Prospection Ğ1** : Il récupère et enrichit les profils des membres de la toile de confiance via `g1prospect_final.sh`.
+2.  **Prospection ğchange** : Il scanne l'activité sur ğchange via `gchange_prospect.sh` pour découvrir de nouveaux utilisateurs et suivre l'activité des anciens.
+3.  **Enrichissement Croisé (Cross-Enrichment)** : C'est la fonctionnalité clé. Quand `gchange_prospect.sh` trouve un utilisateur ğchange qui a lié son compte Ğ1, il **vérifie et met à jour automatiquement** la base de données `g1prospect.json`, créant ainsi un pont entre les deux écosystèmes.
 
-## 📁 Fichiers créés
+## 📁 **Architecture des fichiers**
 
-### Scripts principaux
-- `g1prospect_final.sh` : Script principal fonctionnel (version finale)
-- `test_g1prospect.sh` : Script de test et validation
-- `test_members.json` : Données de test avec 5 membres Ğ1
+### **Scripts principaux**
+-   `g1prospect_final.sh` : Le collecteur dédié à la toile de confiance Ğ1.
+-   `gchange_prospect.sh` : Le collecteur dédié à la place de marché ğchange, qui **déclenche aussi** l'enrichissement de la base Ğ1.
+-   `test_g1prospect.sh` : Script de test pour le collecteur Ğ1.
 
-### Documentation
-- `README_g1prospect.md` : Documentation complète du système
-- `SUMMARY.md` : Ce résumé
+### **Bases de données générées**
+-   `~/.zen/game/g1prospect.json` : La base de données des membres de la toile Ğ1, enrichie par les deux scripts.
+-   `~/.zen/game/gchange_prospect.json` : La base de données des utilisateurs actifs sur ğchange, avec un historique de leurs annonces.
 
-## 🔧 Fonctionnalités implémentées
+## 🔧 **Fonctionnalités du système unifié**
 
-### ✅ Récupération des données
-- Interrogation de l'API Ğ1 WoT (`https://g1.duniter.org/wot/members`)
-- Support des fichiers JSON en paramètre pour les tests
-- Validation de la structure des données
+### ✅ **Collecte de données multi-sources**
+-   **Ğ1 WoT API** (`g1.duniter.org`) : Pour la liste des membres Ğ1.
+-   **Cesium API** (`g1.data.e-is.pro`) : Pour les profils Ğ1 détaillés.
+-   **ğchange API** (`data.gchange.fr`) : Pour les annonces et les profils ğchange.
 
-### ✅ Enrichissement Cesium
-- Interrogation de l'API Cesium pour chaque membre
-- Récupération des profils complets (avatar, description, etc.)
-- Gestion des erreurs d'API gracieuse
+### ✅ **Enrichissement des données**
+-   **Profils complets** : Les deux bases contiennent les profils détaillés des utilisateurs.
+-   **Historique d'activité** : La base ğchange conserve la trace de toutes les annonces détectées pour un utilisateur (`detected_ads`).
+-   **Contexte de découverte** : Chaque prospect ğchange est lié à l'annonce qui a permis de le découvrir (`discovery_ad`).
 
-### ✅ Gestion des données
-- Structure JSON optimisée avec métadonnées
-- Gestion des doublons (évite les re-traitements)
-- Délai automatique entre les requêtes (0.5s)
-- Nettoyage automatique des fichiers temporaires
+### ✅ **Robustesse et efficacité**
+-   **Écriture progressive** : Les données sont sauvegardées en temps réel, garantissant aucune perte en cas d'interruption.
+-   **Détection des doublons** : Le système ne traite jamais deux fois la même information.
+-   **Optimisation des requêtes** : Les téléchargements lourds sont évités grâce au filtrage des images et à des requêtes ciblées.
 
-### ✅ Monitoring et statistiques
-- Affichage du progrès en temps réel
-- Statistiques détaillées du traitement
-- Échantillon des membres traités
-- Gestion d'erreurs robuste
+## �� **Exemple de données enrichies**
 
-## 📊 Résultats obtenus
-
-### Base de données créée
-- **Fichier** : `~/.zen/game/g1prospect.json`
-- **Taille** : ~436KB (avec profils Cesium complets)
-- **Membres** : 5 membres de test traités avec succès
-- **Structure** : JSON structuré avec métadonnées
-
-### Exemple de données
+### **`gchange_prospect.json`**
 ```json
 {
-  "metadata": {
-    "created_date": "2025-07-24T18:39:33Z",
-    "updated_date": "2025-07-24T18:39:38Z",
-    "total_members": 5,
-    "source": "g1_wot_cesium"
+  "uid": "7fJPzRzGidkTAr48415kmK7yKV3FT6r235BudnwCTYUx",
+  "profile": {
+    "pubkey": "K66QRvCQNUvYgbPF5D1v72sPKSus4KweERemDrPeHzb" 
   },
-  "members": [
-    {
-      "pubkey": "12JnMgRiphcRFRoFcmrWcRbUg3u7eqPbVKt1tpHbh4Sr",
-      "uid": "pupucine",
-      "added_date": "2025-07-24T18:39:33Z",
-      "profile": { /* Données Cesium complètes */ },
-      "source": "g1_wot"
-    }
-  ]
+  "discovery_ad": { /* ... détails de la 1ère annonce ... */ },
+  "detected_ads": [ "AXb4aa7iaml2THvBAH4B", "AYc5..."]
 }
 ```
+*Ici, la `pubkey` est le pont qui permet de déclencher l'enrichissement de l'autre base.*
 
-## 🚀 Utilisation
+### **`g1prospect.json`**
+```json
+{
+  "pubkey": "K66QRvCQNUvYgbPF5D1v72sPKSus4KweERemDrPeHzb",
+  "uid": "Fern",
+  "profile": { /* Données Cesium complètes */ },
+  "source": "g1_wot_discovered_via_gchange"
+}
+```
+*Ce membre Ğ1 a été découvert grâce à son activité sur ğchange, une information marketing précieuse.*
 
-### Utilisation basique
+## 🚀 **Utilisation du système**
+
+### **Lancer la prospection Ğ1 seule**
 ```bash
 ./g1prospect_final.sh
 ```
 
-### Utilisation avec données de test
+### **Lancer la prospection ğchange (qui enrichit aussi la base Ğ1)**
 ```bash
-./g1prospect_final.sh test_members.json
+./gchange_prospect.sh
 ```
 
-### Test complet
-```bash
-./test_g1prospect.sh
-```
+## 🔄 **Synergie avec OC2UPlanet**
 
-## 🔄 Intégration avec OC2UPlanet
+Ce système unifié ouvre des possibilités marketing bien plus vastes :
+1.  **Identifier les acteurs économiques** : Repérer les membres Ğ1 qui sont aussi actifs sur la place de marché.
+2.  **Cibler par activité commerciale** : Contacter les utilisateurs en se basant sur les produits ou services qu'ils proposent sur ğchange.
+3.  **Comprendre les ponts communautaires** : Identifier les personnes qui font le lien entre les différents écosystèmes.
 
-Cette base de prospects peut maintenant être utilisée par OC2UPlanet pour :
+## ✅ **Validation**
 
-1. **Identifier** les donateurs potentiels parmi les membres Ğ1
-2. **Enrichir** les données des backers OpenCollective
-3. **Créer** des correspondances entre Ğ1 et UPlanet
-4. **Automatiser** le processus de transfert de tokens Zen
-
-## 🛠️ Prochaines étapes
-
-1. **Intégration** dans le workflow OC2UPlanet
-2. **Scheduling** automatique (cron job)
-3. **Monitoring** de la base de données
-4. **API** pour interroger la base de prospects
-5. **Interface** web pour visualiser les données
-
-## ✅ Validation
-
-Le système a été **entièrement testé** et validé :
-- ✅ Récupération des membres Ğ1
-- ✅ Enrichissement avec Cesium
-- ✅ Gestion des doublons
-- ✅ Structure JSON correcte
-- ✅ Gestion d'erreurs
-- ✅ Documentation complète
-
-**Le script est prêt pour la production !** 🎉 
+Le système a été **entièrement testé** et validé sur ses deux volets. Il est prêt pour une utilisation en production pour alimenter des stratégies marketing avancées. 🎉 
