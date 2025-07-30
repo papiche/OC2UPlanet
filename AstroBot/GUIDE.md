@@ -222,6 +222,32 @@ python3 main.py
 # [Lien vers Documentation] → https://github.com/papiche/Astroport.ONE/blob/master/DOCUMENTATION.md
 ```
 
+**🆕 Nouveauté v2.1 : Personnalisation par Cible**
+
+Le système génère maintenant **un message personnalisé pour chaque cible** :
+
+- **Analyse individuelle** : Chaque profil est analysé séparément
+- **Sélection de banque adaptée** : La banque la plus appropriée est choisie pour chaque cible
+- **Contexte web enrichi** : Recherche Perplexica pour chaque cible ayant un site web
+- **Messages sauvegardés** : 
+  - `workspace/personalized_messages.json` : Tous les messages personnalisés
+  - `workspace/message_to_send.txt` : Premier message (compatibilité)
+
+**Exemple de sortie :**
+```
+🎯 Génération du message personnalisé pour la cible 1/5 : Cobart31
+🎭 Mode Persona : Banque sélectionnée automatiquement : Le Codeur Libre
+✅ Message personnalisé généré pour Cobart31
+
+🎯 Génération du message personnalisé pour la cible 2/5 : AliceDev
+🎭 Mode Persona : Banque sélectionnée automatiquement : L'Innovateur Digital
+✅ Message personnalisé généré pour AliceDev
+
+...
+
+✅ 5 messages personnalisés générés et sauvegardés. Prêt pour validation par l'Opérateur.
+```
+
 #### Étape 5 : Envoi de la Campagne
 ```bash
 # 3. Lancer l'Agent Opérateur
@@ -255,7 +281,8 @@ python3 main.py
 - `workspace/memory_banks_config.json` : Configuration des banques de mémoire (manuelles + auto-générées)
 - `workspace/enriched_prospects.json` : Base de connaissance des prospects (analyse persistante)
 - `workspace/todays_targets.json` : Cibles du jour
-- `workspace/message_to_send.txt` : Message à envoyer
+- `workspace/message_to_send.txt` : Premier message généré (compatibilité)
+- `workspace/personalized_messages.json` : **🆕 Tous les messages personnalisés par cible**
 - `workspace/links_config.json` : Configuration des liens externes (OpenCollective, Discord, etc.)
 - `~/.zen/tmp/astrobot.log` : Logs détaillés du système
 
@@ -291,6 +318,34 @@ python3 main.py
   "timestamp": "2025-07-30T12:00:00Z",
   "slot": 0
 }
+```
+
+#### Messages Personnalisés (🆕 v2.1)
+```json
+[
+  {
+    "target": {
+      "pubkey": "7YschDTUmy13KZQzrDzNkvDE43RzK6JtUqPvSuiqoqZi",
+      "uid": "Cobart31",
+      "metadata": {
+        "tags": ["developpeur", "crypto", "technologie"]
+      }
+    },
+    "message": "Bonjour Cobart31, en tant que développeur passionné par les technologies décentralisées...",
+    "mode": "persona"
+  },
+  {
+    "target": {
+      "pubkey": "8ZtchEVVmy24LZQzrEzOkvEF54SzL7KtVqQvTvjvppqZj",
+      "uid": "AliceDev",
+      "metadata": {
+        "tags": ["art", "creativite", "design"]
+      }
+    },
+    "message": "Salut AliceDev, ton approche créative et ton sens du design...",
+    "mode": "persona"
+  }
+]
 ```
 
 ## 🎨 Personnalisation Avancée

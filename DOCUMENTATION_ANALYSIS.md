@@ -109,6 +109,8 @@ def _analyze_profile_and_select_bank(self, targets, banks_config):
 6. **Détection Intelligente** : Niveau d'analyse
 7. **Gestion des Banques** : 12 slots (0-11)
 8. **Mémoire Contextuelle** : Interactions par slot
+9. **🆕 Personnalisation par Cible** : Messages individuels pour chaque prospect
+10. **🆕 Sauvegarde Structurée** : `personalized_messages.json` avec tous les messages
 
 ### **✅ Fonctionnalités Documentées Correctement**
 
@@ -117,6 +119,8 @@ def _analyze_profile_and_select_bank(self, targets, banks_config):
 3. **Configuration** : Fichiers et paramètres
 4. **Dépannage** : Problèmes courants et solutions
 5. **Optimisation** : Stratégies par archétype
+6. **🆕 Personnalisation par Cible** : Nouvelle fonctionnalité documentée
+7. **🆕 Structure des Messages** : Format JSON des messages personnalisés
 
 ## 🎯 **Recommandations**
 

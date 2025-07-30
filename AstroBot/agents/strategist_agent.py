@@ -121,43 +121,64 @@ class StrategistAgent(Agent):
         # Choisir le mode de rédaction
         mode = self._choose_strategy_mode()
         
-        if mode == "persona":
-            # Mode Persona : Analyse automatique du profil et sélection de banque
-            selected_bank = self._analyze_profile_and_select_bank(self.shared_state['targets'], banks_config)
-            if selected_bank:
-                self.logger.info(f"🎭 Mode Persona : Banque sélectionnée automatiquement : {selected_bank['name']}")
-                self._generate_message_with_persona_mode(selected_bank, treasury_pubkey)
+        # Générer les messages personnalisés pour chaque cible
+        personalized_messages = []
+        
+        for i, target in enumerate(self.shared_state['targets']):
+            self.logger.info(f"🎯 Génération du message personnalisé pour la cible {i+1}/{len(self.shared_state['targets'])} : {target.get('uid', 'Unknown')}")
+            
+            if mode == "persona":
+                # Mode Persona : Analyse automatique du profil et sélection de banque
+                selected_bank = self._analyze_profile_and_select_bank([target], banks_config)
+                if selected_bank:
+                    self.logger.info(f"🎭 Mode Persona : Banque sélectionnée automatiquement : {selected_bank['name']}")
+                    message_content = self._generate_personalized_message_with_persona_mode(selected_bank, treasury_pubkey, target)
+                else:
+                    self.logger.warning("⚠️ Mode Persona : Aucune banque adaptée trouvée, passage en mode classique")
+                    message_content = self._generate_personalized_message_with_classic_mode(banks_config, treasury_pubkey, target)
+            elif mode == "auto":
+                # Mode Auto : Utilisation de la logique existante
+                selected_bank = self._select_bank_for_targets([target], banks_config)
+                if selected_bank:
+                    self.logger.info(f"🎭 Mode Auto : Banque sélectionnée : {selected_bank['name']}")
+                    message_content = self._generate_personalized_message_with_bank_mode(selected_bank, target)
+                else:
+                    self.logger.info("📝 Mode Auto : Aucune banque adaptée, passage en mode classique")
+                    message_content = self._generate_personalized_message_with_classic_mode(banks_config, treasury_pubkey, target)
             else:
-                self.logger.warning("⚠️ Mode Persona : Aucune banque adaptée trouvée, passage en mode classique")
-                self._generate_message_with_classic_mode(banks_config, treasury_pubkey)
-        elif mode == "auto":
-            # Mode Auto : Utilisation de la logique existante
-            selected_bank = self._select_bank_for_targets(self.shared_state['targets'], banks_config)
-            if selected_bank:
-                self.logger.info(f"🎭 Mode Auto : Banque sélectionnée : {selected_bank['name']}")
-                self._generate_message_with_bank_mode(selected_bank)
-            else:
-                self.logger.info("📝 Mode Auto : Aucune banque adaptée, passage en mode classique")
-                self._generate_message_with_classic_mode(banks_config, treasury_pubkey)
-        else:
-            # Mode Classique : Choix manuel
-            self.logger.info("📝 Mode Classique : Choix manuel de la banque")
-            self._generate_message_with_classic_mode(banks_config, treasury_pubkey)
+                # Mode Classique : Choix manuel
+                self.logger.info("📝 Mode Classique : Choix manuel de la banque")
+                message_content = self._generate_personalized_message_with_classic_mode(banks_config, treasury_pubkey, target)
 
-        if not message_content:
-            self.logger.error("L'IA n'a retourné aucun message.")
+            if message_content:
+                personalized_messages.append({
+                    'target': target,
+                    'message': message_content,
+                    'mode': mode
+                })
+                self.logger.info(f"✅ Message personnalisé généré pour {target.get('uid', 'Unknown')}")
+            else:
+                self.logger.warning(f"⚠️ Échec de génération du message pour {target.get('uid', 'Unknown')}")
+
+        if not personalized_messages:
+            self.logger.error("Aucun message n'a pu être généré.")
             self.shared_state['status']['StrategistAgent'] = "Échec : Aucun message généré."
             return
 
-        # Sauvegarder le message
-        message_file = os.path.join(self.shared_state['config']['workspace'], "message_to_send.txt")
-        with open(message_file, 'w') as f:
-            f.write(message_content)
+        # Sauvegarder tous les messages personnalisés
+        messages_file = os.path.join(self.shared_state['config']['workspace'], "personalized_messages.json")
+        with open(messages_file, 'w', encoding='utf-8') as f:
+            json.dump(personalized_messages, f, indent=2, ensure_ascii=False)
 
-        report = "Message de campagne rédigé et sauvegardé dans workspace/message_to_send.txt. Prêt pour validation par l'Opérateur."
+        # Sauvegarder aussi le premier message comme message générique (pour compatibilité)
+        message_file = os.path.join(self.shared_state['config']['workspace'], "message_to_send.txt")
+        with open(message_file, 'w', encoding='utf-8') as f:
+            f.write(personalized_messages[0]['message'])
+
+        report = f"{len(personalized_messages)} messages personnalisés générés et sauvegardés. Prêt pour validation par l'Opérateur."
         self.logger.info(f"✅ {report}")
         self.shared_state['status']['StrategistAgent'] = report
-        self.shared_state['message_to_send'] = message_content
+        self.shared_state['personalized_messages'] = personalized_messages
 
     def _check_ollama_once(self):
         """Vérifie une seule fois que l'API Ollama est disponible."""
@@ -1197,20 +1218,19 @@ ANALYSE :"""
         
         return None
 
-    def _generate_message_with_persona_mode(self, selected_bank, treasury_pubkey):
-        """Génère un message en mode Persona avec la banque sélectionnée automatiquement"""
-        self.logger.info(f"🎭 Mode Persona : Génération du message avec {selected_bank['name']}")
+    def _generate_personalized_message_with_persona_mode(self, selected_bank, treasury_pubkey, target):
+        """Génère un message personnalisé en mode Persona pour une cible spécifique"""
+        self.logger.info(f"🎭 Mode Persona : Génération du message personnalisé pour {target.get('uid', 'Unknown')}")
         
         try:
             # Construire le contexte enrichi pour la banque
             analyst_report = self.shared_state.get('analyst_report', "Aucun rapport.")
-            first_target = self.shared_state['targets'][0]
 
             # Ajouter le contexte web si disponible
             web_context = ""
-            if first_target.get('website'):
-                self.logger.info(f"🕵️  Recherche Perplexica sur le site : {first_target['website']}...")
-                search_query = f"Fais un résumé de l'activité du site {first_target['website']} et de son propriétaire {first_target.get('uid', '')} pour comprendre ses centres d'intérêt."
+            if target.get('website'):
+                self.logger.info(f"🕵️  Recherche Perplexica sur le site : {target['website']}...")
+                search_query = f"Fais un résumé de l'activité du site {target['website']} et de son propriétaire {target.get('uid', '')} pour comprendre ses centres d'intérêt."
                 web_context = self._call_perplexica(search_query)
                 self.logger.info("✅ Contexte web obtenu.")
 
@@ -1218,7 +1238,7 @@ ANALYSE :"""
             target_description = f"""MODE PERSONA - PERSONNALISATION AVANCÉE
 
 Rapport Analyste: {analyst_report}
-Prospect: {json.dumps(first_target, indent=2, ensure_ascii=False)}"""
+Prospect: {json.dumps(target, indent=2, ensure_ascii=False)}"""
 
             if web_context:
                 target_description += f"\nContexte Web: {web_context}"
@@ -1230,37 +1250,35 @@ INSTRUCTIONS SPÉCIALES MODE PERSONA :
 - Personnalise le message en fonction du profil spécifique du prospect
 - Utilise le vocabulaire et les arguments de la banque "{selected_bank['name']}"
 - Crée une connexion émotionnelle basée sur les centres d'intérêt identifiés
-- Sois authentique et adapte le style au profil analysé"""
+- Sois authentique et adapte le style au profil analysé
+- Adresse-toi directement à {target.get('uid', 'le prospect')}"""
 
             # Générer le message avec la banque
             message_content = self._generate_message_with_bank(selected_bank, target_description)
             
-            # Sauvegarder le message
-            message_file = os.path.join(self.shared_state['config']['workspace'], 'message_to_send.txt')
-            with open(message_file, 'w', encoding='utf-8') as f:
-                f.write(message_content)
-            
-            self.logger.info("✅ Message de campagne rédigé et sauvegardé dans workspace/message_to_send.txt. Prêt pour validation par l'Opérateur.")
-            self.shared_state['status']['StrategistAgent'] = f"Message rédigé avec banque {selected_bank['name']} (Mode Persona)"
+            return message_content
             
         except Exception as e:
-            self.logger.error(f"Erreur lors de la génération en mode Persona : {e}")
-            self.shared_state['status']['StrategistAgent'] = f"Échec : {e}"
+            self.logger.error(f"Erreur lors de la génération en mode Persona pour {target.get('uid', 'Unknown')} : {e}")
+            return None
 
-    def _generate_message_with_bank_mode(self, selected_bank):
-        """Génère un message en mode Auto avec la banque sélectionnée automatiquement"""
-        self.logger.info(f"🎭 Mode Auto : Génération du message avec {selected_bank['name']}")
+    def _generate_message_with_persona_mode(self, selected_bank, treasury_pubkey):
+        """Génère un message en mode Persona avec la banque sélectionnée automatiquement (méthode legacy)"""
+        return self._generate_personalized_message_with_persona_mode(selected_bank, treasury_pubkey, self.shared_state['targets'][0])
+
+    def _generate_personalized_message_with_bank_mode(self, selected_bank, target):
+        """Génère un message personnalisé en mode Auto pour une cible spécifique"""
+        self.logger.info(f"🎭 Mode Auto : Génération du message personnalisé pour {target.get('uid', 'Unknown')}")
         
         try:
             # Construire le contexte pour la banque
             analyst_report = self.shared_state.get('analyst_report', "Aucun rapport.")
-            first_target = self.shared_state['targets'][0]
 
             # Ajouter le contexte web si disponible
             web_context = ""
-            if first_target.get('website'):
-                self.logger.info(f"🕵️  Recherche Perplexica sur le site : {first_target['website']}...")
-                search_query = f"Fais un résumé de l'activité du site {first_target['website']} et de son propriétaire {first_target.get('uid', '')} pour comprendre ses centres d'intérêt."
+            if target.get('website'):
+                self.logger.info(f"🕵️  Recherche Perplexica sur le site : {target['website']}...")
+                search_query = f"Fais un résumé de l'activité du site {target['website']} et de son propriétaire {target.get('uid', '')} pour comprendre ses centres d'intérêt."
                 web_context = self._call_perplexica(search_query)
                 self.logger.info("✅ Contexte web obtenu.")
 
@@ -1268,26 +1286,25 @@ INSTRUCTIONS SPÉCIALES MODE PERSONA :
             target_description = f"Rapport Analyste: {analyst_report}"
             if web_context:
                 target_description += f"\nContexte Web: {web_context}"
-            target_description += f"\nExemple de cible: {json.dumps(first_target, indent=2, ensure_ascii=False)}"
+            target_description += f"\nCible spécifique: {json.dumps(target, indent=2, ensure_ascii=False)}"
+            target_description += f"\nAdresse-toi directement à {target.get('uid', 'le prospect')}"
 
             # Générer le message avec la banque
             message_content = self._generate_message_with_bank(selected_bank, target_description)
             
-            # Sauvegarder le message
-            message_file = os.path.join(self.shared_state['config']['workspace'], 'message_to_send.txt')
-            with open(message_file, 'w', encoding='utf-8') as f:
-                f.write(message_content)
-            
-            self.logger.info("✅ Message de campagne rédigé et sauvegardé dans workspace/message_to_send.txt. Prêt pour validation par l'Opérateur.")
-            self.shared_state['status']['StrategistAgent'] = f"Message rédigé avec banque {selected_bank['name']} (Mode Auto)"
+            return message_content
             
         except Exception as e:
-            self.logger.error(f"Erreur lors de la génération en mode Auto : {e}")
-            self.shared_state['status']['StrategistAgent'] = f"Échec : {e}"
+            self.logger.error(f"Erreur lors de la génération en mode Auto pour {target.get('uid', 'Unknown')} : {e}")
+            return None
 
-    def _generate_message_with_classic_mode(self, banks_config, treasury_pubkey):
-        """Génère un message en mode Classique avec choix manuel de banque"""
-        self.logger.info("📝 Mode Classique : Génération du message")
+    def _generate_message_with_bank_mode(self, selected_bank):
+        """Génère un message en mode Auto avec la banque sélectionnée automatiquement (méthode legacy)"""
+        return self._generate_personalized_message_with_bank_mode(selected_bank, self.shared_state['targets'][0])
+
+    def _generate_personalized_message_with_classic_mode(self, banks_config, treasury_pubkey, target):
+        """Génère un message personnalisé en mode Classique pour une cible spécifique"""
+        self.logger.info(f"📝 Mode Classique : Génération du message personnalisé pour {target.get('uid', 'Unknown')}")
         
         try:
             # Proposer le choix d'une banque de contexte
@@ -1340,17 +1357,17 @@ INSTRUCTIONS SPÉCIALES MODE PERSONA :
             final_prompt += f"\n\n--- RAPPORT DE L'ANALYSTE ---\n{analyst_report}"
 
             # 4. Web-Search avec Perplexica pour enrichir le contexte
-            first_target = self.shared_state['targets'][0]
-            if first_target.get('website'):
-                self.logger.info(f"🕵️  Recherche Perplexica sur le site : {first_target['website']}...")
-                search_query = f"Fais un résumé de l'activité du site {first_target['website']} et de son propriétaire {first_target.get('uid', '')} pour comprendre ses centres d'intérêt."
+            if target.get('website'):
+                self.logger.info(f"🕵️  Recherche Perplexica sur le site : {target['website']}...")
+                search_query = f"Fais un résumé de l'activité du site {target['website']} et de son propriétaire {target.get('uid', '')} pour comprendre ses centres d'intérêt."
 
                 web_context = self._call_perplexica(search_query)
                 self.logger.info("✅ Contexte web obtenu.")
                 final_prompt += f"\n\n--- CONTEXTE DU WEB (via Perplexica) ---\n{web_context}"
 
-            # 5. Ajouter un exemple de cible pour la personnalisation
-            final_prompt += f"\n\n--- EXEMPLE DE CIBLE ---\n{json.dumps(first_target, indent=2, ensure_ascii=False)}"
+            # 5. Ajouter la cible spécifique pour la personnalisation
+            final_prompt += f"\n\n--- CIBLE SPÉCIFIQUE ---\n{json.dumps(target, indent=2, ensure_ascii=False)}"
+            final_prompt += f"\n\nAdresse-toi directement à {target.get('uid', 'le prospect')}"
             final_prompt += "\n\nMaintenant, en te basant sur TOUTES ces informations, rédige le message de campagne final. Ta réponse DOIT être uniquement le message, sans commentaire additionnel."
 
             self.logger.info("🧠 Prompt final construit. Interrogation de l'IA locale via question.py...")
@@ -1361,14 +1378,12 @@ INSTRUCTIONS SPÉCIALES MODE PERSONA :
             # Appliquer l'injection de liens
             message_content = self._inject_links(message_content, self.shared_state['config'])
             
-            # Sauvegarder le message
-            message_file = os.path.join(self.shared_state['config']['workspace'], 'message_to_send.txt')
-            with open(message_file, 'w', encoding='utf-8') as f:
-                f.write(message_content)
-            
-            self.logger.info("✅ Message de campagne rédigé et sauvegardé dans workspace/message_to_send.txt. Prêt pour validation par l'Opérateur.")
-            self.shared_state['status']['StrategistAgent'] = "Message rédigé (Mode Classique)"
+            return message_content
             
         except Exception as e:
-            self.logger.error(f"Erreur lors de la génération en mode Classique : {e}")
-            self.shared_state['status']['StrategistAgent'] = f"Échec : {e}"
+            self.logger.error(f"Erreur lors de la génération en mode Classique pour {target.get('uid', 'Unknown')} : {e}")
+            return None
+
+    def _generate_message_with_classic_mode(self, banks_config, treasury_pubkey):
+        """Génère un message en mode Classique avec choix manuel de banque (méthode legacy)"""
+        return self._generate_personalized_message_with_classic_mode(banks_config, treasury_pubkey, self.shared_state['targets'][0])
