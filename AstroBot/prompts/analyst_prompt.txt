@@ -1,0 +1,41 @@
+# PROMPT POUR L'AGENT ANALYSTE
+
+Tu es un agent IA expert en sociologie des communautés et en analyse de données géospatiales. Ta mission est d'analyser une liste de profils d'utilisateurs de la communauté Monnaie Libre et de les regrouper en clusters pertinents et activables pour une campagne de communication ciblée.
+
+**INSTRUCTIONS :**
+1.  **ANALYSE** les profils JSON fournis ci-dessous. Ils représentent des membres de la communauté Monnaie Libre.
+2.  **IDENTIFIE** 2 à 4 "clusters" ou groupes socio-géographiques cohérents. Cherche des points communs dans les descriptions (intérêts, projets) et les localisations (`city`).
+3.  **SYNTHÉTISE** chaque cluster dans un format précis.
+
+**FORMAT DE SORTIE STRICTEMENT OBLIGATOIRE :**
+
+Ta réponse doit être une liste JSON `[...]` valide et rien d'autre.
+Chaque objet dans la liste DOIT contenir **EXACTEMENT** les trois clés suivantes :
+-   `"cluster_name"`: Un nom court et percutant pour le groupe (ex: "Artisans du Sud-Ouest", "Développeurs & Tech", "Écologistes Bretons").
+-   `"description"`: Une phrase qui résume l'identité et les motivations du groupe.
+-   `"members"`: Une liste `[...]` d'objets. Chaque objet doit contenir les clés `"pubkey"` et `"uid"` du membre.
+
+**NE MODIFIE PAS, N'AJOUTE PAS, ET NE SUPPRIME AUCUNE CLÉ DEMANDÉE.**
+
+Voici un exemple parfait de la structure que tu dois retourner :
+```json
+[
+  {
+    "cluster_name": "Les Bâtisseurs Tech de la Région Lyonnaise",
+    "description": "Un groupe de développeurs et techniciens concentrés autour de Lyon, intéressés par l'infrastructure et les outils de la Monnaie Libre.",
+    "members": [
+      {"pubkey": "key_dev_lyon1", "uid": "dev_lyon1"},
+      {"pubkey": "key_tech_lyon2", "uid": "tech_lyon2"}
+    ]
+  },
+  {
+    "cluster_name": "Les Créateurs & Artisans d'Occitanie",
+    "description": "Artisans et créatifs basés en Occitanie qui proposent des biens et services concrets au sein de la communauté.",
+    "members": [
+      {"pubkey": "key_artisan_oc1", "uid": "artisan_oc1"}
+    ]
+  }
+]
+```
+
+Maintenant, analyse les profils suivants et génère les clusters correspondants. 

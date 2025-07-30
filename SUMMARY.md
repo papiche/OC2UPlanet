@@ -1,4 +1,9 @@
-# Prospect Database Builder - Résumé du Système Unifié
+# 📊 Prospect Database Builder - Résumé du Système Unifié
+
+> **📚 Documentation associée :**
+> - [🚀 Guide AstroBot](AstroBot/GUIDE.md) - Guide complet du système d'agents IA
+> - [🎭 Mode Persona](AstroBot/MODE_PERSONA_SUMMARY.md) - Fonctionnalités avancées de personnalisation
+> - [🎯 Guide Marketing](MARKETING.md) - Stratégies de prospection dans les bases Ğ1 & ğchange
 
 ## 🎯 **Objectif atteint : Un système de prospection à double source**
 
@@ -37,7 +42,7 @@ Nous avons créé un **écosystème de prospection avancé** qui unifie les donn
 -   **Détection des doublons** : Le système ne traite jamais deux fois la même information.
 -   **Optimisation des requêtes** : Les téléchargements lourds sont évités grâce au filtrage des images et à des requêtes ciblées.
 
-## �� **Exemple de données enrichies**
+## 📊 **Exemple de données enrichies**
 
 ### **`gchange_prospect.json`**
 ```json
@@ -81,6 +86,21 @@ Ce système unifié ouvre des possibilités marketing bien plus vastes :
 1.  **Identifier les acteurs économiques** : Repérer les membres Ğ1 qui sont aussi actifs sur la place de marché.
 2.  **Cibler par activité commerciale** : Contacter les utilisateurs en se basant sur les produits ou services qu'ils proposent sur ğchange.
 3.  **Comprendre les ponts communautaires** : Identifier les personnes qui font le lien entre les différents écosystèmes.
+
+## 🤖 **Intégration avec AstroBot**
+
+Le système de prospection unifié alimente directement **AstroBot**, notre système d'agents IA pour les campagnes marketing :
+
+### **Flux de données**
+1. **Collecte** : Les scripts `g1prospect_final.sh` et `gchange_prospect.sh` collectent les données
+2. **Enrichissement** : AstroBot analyse et enrichit les profils avec des tags thématiques
+3. **Personnalisation** : L'Agent Stratège utilise les données enrichies pour créer des messages personnalisés
+4. **Exécution** : L'Agent Opérateur envoie les campagnes via les canaux appropriés
+
+### **Avantages de l'intégration**
+- **Données fraîches** : AstroBot utilise toujours les données les plus récentes
+- **Enrichissement croisé** : Les données Ğ1 et ğchange se complètent mutuellement
+- **Ciblage précis** : Possibilité de cibler selon l'activité économique ET l'appartenance à la toile de confiance
 
 ## ✅ **Validation**
 

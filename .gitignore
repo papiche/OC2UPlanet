@@ -1,3 +1,139 @@
+# Environment variables
 .env
+
+# Data directories and files
 data/
+workspace/
+AstroBot/workspace/
+
+# Large data files
+*.json
+!test_*.json
+!links_config.json
+!memory_banks_config.json
+
+# Logs
+*.log
+~/.zen/tmp/astrobot.log
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Sensitive files
 OpenCollective.md
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Test outputs
+test_outputs/
+test_results/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Configuration files with sensitive data
+config.local.json
+secrets.json
+
+# Node modules (if any)
+node_modules/
+
+# Compiled files
+*.com
+*.class
+*.dll
+*.exe
+*.o
+*.so
+
+# Archives
+*.7z
+*.dmg
+*.gz
+*.iso
+*.jar
+*.rar
+*.tar
+*.zip
+
+# Media files
+*.mp3
+*.mp4
+*.avi
+*.mov
+*.wmv
+*.flv
+*.webm
+
+# Large binary files
+*.bin
+*.dat
+*.dump
+
+# Specific project files
+members_*.json
+g1prospect.json
+gchange_prospect.json
+enriched_prospects.json
+todays_targets.json
+message_to_send.txt
+
+# Operator memory (contains sensitive interaction data)
+AstroBot/workspace/operator_memory/
