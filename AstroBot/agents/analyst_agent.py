@@ -302,7 +302,7 @@ class AnalystAgent(Agent):
             
             # Ajouter un User-Agent pour respecter les conditions d'utilisation
             headers = {
-                'User-Agent': 'UPlanet ORIGIN ẐEN - AstroBot/1.0 (https://qo-op.com)'
+                'User-Agent': 'UPlanet ORIGIN ZEN - AstroBot/1.0 (https://qo-op.com)'
             }
             
             response = requests.get(url, params=params, headers=headers, timeout=10)
