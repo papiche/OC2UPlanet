@@ -6,6 +6,7 @@ import random
 import requests
 import time
 from collections import defaultdict, Counter
+import unicodedata
 
 class AnalystAgent(Agent):
     """
@@ -1325,6 +1326,14 @@ Le persona doit être adapté au thème "{theme}" et aux personnes intéressées
                 self._ollama_checked = False
         return self._ollama_checked 
 
+    def _normalize_tag(self, tag: str) -> str:
+        """Normalise un tag en le passant en minuscules et en supprimant les accents."""
+        # Passage en minuscules
+        tag = tag.lower()
+        # Suppression des accents
+        nfkd_form = unicodedata.normalize('NFD', tag)
+        return "".join([c for c in nfkd_form if not unicodedata.combining(c)])
+
     def optimize_thematic_analysis(self):
         """
         Optimise les thèmes en consolidant et nettoyant le Top 50.
@@ -1357,8 +1366,25 @@ Le persona doit être adapté au thème "{theme}" et aux personnes intéressées
         
         # Compter les occurrences
         tag_counts = Counter(all_tags)
-        unique_tags = len(tag_counts)
-        self.logger.info(f"📊 {unique_tags} thèmes uniques détectés dans la base.")
+        unique_tags_before = len(tag_counts)
+        self.logger.info(f"📊 {unique_tags_before} thèmes uniques détectés avant normalisation.")
+        
+        # --- Consolidation des thèmes (accents, casse, etc.) ---
+        normalized_tag_counts = Counter()
+        tag_map = {}  # Mappe les anciens tags vers les nouveaux normalisés
+        
+        for tag, count in tag_counts.items():
+            normalized_tag = self._normalize_tag(tag)
+            tag_map[tag] = normalized_tag
+            normalized_tag_counts[normalized_tag] += count
+
+        unique_tags_after = len(normalized_tag_counts)
+        if unique_tags_before != unique_tags_after:
+            self.logger.info(f"📊 {unique_tags_after} thèmes uniques après normalisation (consolidation de {unique_tags_before - unique_tags_after} variantes).")
+
+        # Remplacer tag_counts par les comptes normalisés pour la suite du traitement
+        tag_counts = normalized_tag_counts
+        unique_tags = unique_tags_after
         
         # Filtrer les thèmes avec moins de 3 occurrences
         filtered_tags = {tag: count for tag, count in tag_counts.items() if count >= 3}
@@ -1375,26 +1401,32 @@ Le persona doit être adapté au thème "{theme}" et aux personnes intéressées
                 for pubkey, data in knowledge_base.items():
                     metadata = data.get('metadata', {})
                     tags = metadata.get('tags', [])
-                    if tag in tags:
-                        profiles_with_tag.append(data.get('uid', pubkey[:10]))
+                    if tags and tags != ['error']:
+                        # On vérifie la version normalisée
+                        normalized_profile_tags = [self._normalize_tag(t) for t in tags]
+                        if tag in normalized_profile_tags:
+                            profiles_with_tag.append(data.get('uid', pubkey[:10]))
                 
                 self.logger.info(f"  ❌ {tag:<20} ({count:>2} occurrences) - Profils: {', '.join(profiles_with_tag[:3])}")
                 if len(profiles_with_tag) > 3:
                     self.logger.info(f"      ... et {len(profiles_with_tag) - 3} autres")
         
-        # Nettoyer les profils en supprimant les tags non conservés
+        # Nettoyer et normaliser les tags dans les profils
         cleaned_profiles = 0
         for pubkey, data in knowledge_base.items():
             metadata = data.get('metadata', {})
             tags = metadata.get('tags', [])
             if tags and tags != ['error']:
-                # Garder seulement les tags conservés
-                cleaned_tags = [tag for tag in tags if tag in filtered_tags]
-                if cleaned_tags != tags:
-                    data['metadata']['tags'] = cleaned_tags
+                # Normaliser chaque tag, filtrer ceux qui ne sont pas conservés, et dédoublonner
+                new_tags_set = {tag_map[tag] for tag in tags if tag_map.get(tag) in filtered_tags}
+                new_tags = sorted(list(new_tags_set))
+                
+                # Mettre à jour si la liste a changé
+                if new_tags != tags:
+                    metadata['tags'] = new_tags
                     cleaned_profiles += 1
         
-        self.logger.info(f"🔄 {cleaned_profiles} profils nettoyés. Sauvegarde...")
+        self.logger.info(f"🔄 {cleaned_profiles} profils nettoyés et normalisés. Sauvegarde...")
         
         # Sauvegarder la base optimisée
         self._save_knowledge_base(knowledge_base)
@@ -1405,7 +1437,7 @@ Le persona doit être adapté au thème "{theme}" et aux personnes intéressées
         for i, (tag, count) in enumerate(top_50, 1):
             self.logger.info(f"  {i:>2}. {tag:<20} ({count:>4} occurrences)")
         
-        self.logger.info(f"✅ Optimisation terminée ! {len(filtered_tags)} thèmes conservés sur {unique_tags} initiaux.")
+        self.logger.info(f"✅ Optimisation terminée ! {len(filtered_tags)} thèmes conservés sur {unique_tags_before} initiaux.")
 
     def advanced_multi_selection_targeting(self):
         """
