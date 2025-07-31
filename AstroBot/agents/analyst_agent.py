@@ -1044,7 +1044,7 @@ Le persona doit être adapté au thème "{theme}" et aux personnes intéressées
             for field in required_fields:
                 if field not in persona_data:
                     self.logger.warning(f"⚠️ Champ manquant dans le persona : {field}")
-                return None
+                    return None
                 
             # Vérifier que le contenu multilingue est présent
             if 'multilingual' not in persona_data:

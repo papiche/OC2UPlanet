@@ -244,9 +244,9 @@ class AstroBotOrchestrator:
                 self.logger.info("\nCONSEIL : Message rédigé. L'étape suivante est de lancer l'Agent Opérateur (3) pour l'envoyer.")
 
             print("\nQue souhaitez-vous faire ?")
-            print("1. Lancer l'Agent Analyste (Identifier les cibles)")
-            print("2. Lancer l'Agent Stratège (Rédiger le message)")
-            print("3. Lancer l'Agent Opérateur (Envoyer la campagne)")
+            print("1. Lancer l'Agent ANALYSTE : Identifier les cibles")
+            print("2. Lancer l'Agent STRATEGE : Rédiger le message")
+            print("3. Lancer l'Agent OPERATEUR : Envoyer la campagne")
             print("")
             print("4. Gérer les Mémoires Persona (0-9)")
             print("5. Gérer les Interactions de l'Opérateur")
