@@ -116,6 +116,7 @@ class AnalystAgent(Agent):
         
         language_analyzed = 0
         tags_analyzed = 0
+        web2_analyzed = 0
         gps_prospects = 0
         
         for pk, data in knowledge_base.items():
@@ -124,6 +125,8 @@ class AnalystAgent(Agent):
                 language_analyzed += 1
             if 'tags' in metadata:
                 tags_analyzed += 1
+            if 'web2' in metadata:
+                web2_analyzed += 1
             
             # Compter les profils avec GPS
             profile = data.get('profile', {})
@@ -140,6 +143,7 @@ class AnalystAgent(Agent):
             "total": total_prospects,
             "language": language_analyzed,
             "tags": tags_analyzed,
+            "web2": web2_analyzed,
             "gps_prospects": gps_prospects
         }
 
@@ -423,20 +427,30 @@ class AnalystAgent(Agent):
         Agrège les tags existants dans la base de connaissance,
         présente les thèmes sous forme de clusters, et permet à 
         l'utilisateur de sélectionner une cible pour une campagne.
+        Inclut également les réseaux sociaux (web2).
         """
-        self.logger.info("🤖 Agent Analyste : Préparation du ciblage par thème...")
+        self.logger.info("🤖 Agent Analyste : Préparation du ciblage par thème et réseaux sociaux...")
         knowledge_base = self._load_and_sync_knowledge_base()
         
-        # Agréger les résultats
-        self.logger.info("--- Agrégation des thèmes existants ---")
+        # Agréger les résultats (thèmes + réseaux sociaux)
+        self.logger.info("--- Agrégation des thèmes et réseaux sociaux existants ---")
         members_by_tag = defaultdict(list)
+        
         for pubkey, data in knowledge_base.items():
-            if 'tags' in data.get('metadata', {}):
-                for tag in data['metadata']['tags']:
+            metadata = data.get('metadata', {})
+            
+            # Ajouter les tags thématiques
+            if 'tags' in metadata:
+                for tag in metadata['tags']:
                     members_by_tag[tag].append(data)
+            
+            # Ajouter les réseaux sociaux (web2)
+            if 'web2' in metadata:
+                for social in metadata['web2']:
+                    members_by_tag[social].append(data)
         
         if not members_by_tag:
-            self.logger.warning("Aucun thème n'a encore été analysé. Veuillez lancer l'analyse par thèmes d'abord (option 2).")
+            self.logger.warning("Aucun thème ou réseau social n'a encore été analysé. Veuillez lancer l'analyse par thèmes d'abord (option 2).")
             self.shared_state['status']['AnalystAgent'] = "Aucun thème à cibler."
             return
 
@@ -444,24 +458,28 @@ class AnalystAgent(Agent):
         # Trier par nombre de membres, du plus grand au plus petit
         sorted_tags = sorted(members_by_tag.items(), key=lambda item: len(item[1]), reverse=True)
 
-        # Limiter à l'affichage des 50 thèmes les plus populaires pour ne pas surcharger le menu
+        # Limiter à l'affichage des 50 thèmes/réseaux les plus populaires pour ne pas surcharger le menu
         for tag, members in sorted_tags[:50]:
+            # Déterminer le type (thème ou réseau social)
+            tag_type = "Réseau" if tag in ['website', 'facebook', 'email', 'instagram', 'youtube', 'twitter', 'diaspora', 'linkedin', 'github', 'phone', 'vimeo'] else "Thème"
+            
             clusters.append({
-                "cluster_name": f"Thème : {tag.capitalize()}",
-                "description": f"Groupe de {len(members)} membres partageant l'intérêt ou la compétence '{tag}'.",
+                "cluster_name": f"{tag_type} : {tag.capitalize()}",
+                "description": f"Groupe de {len(members)} membres avec '{tag}'.",
                 "members": members
             })
         
-        self.logger.info("Les 50 thèmes les plus populaires :")
+        self.logger.info("Les 50 thèmes et réseaux sociaux les plus populaires :")
         self._select_and_save_cluster(clusters)
 
     def run_thematic_analysis(self):
         """
         Analyse les descriptions des prospects pour en extraire des mots-clés
         thématiques (tags) et les sauvegarde dans la base de connaissance.
+        Inclut également les réseaux sociaux détectés dans les profils.
         """
-        self.logger.info("🤖 Agent Analyste : Démarrage de l'analyse thématique (avec persistance)...")
-        self.shared_state['status']['AnalystAgent'] = "Analyse thématique en cours..."
+        self.logger.info("🤖 Agent Analyste : Démarrage de l'analyse thématique enrichie (avec persistance)...")
+        self.shared_state['status']['AnalystAgent'] = "Analyse thématique enrichie en cours..."
 
         if not self._check_ollama_once():
             self.shared_state['status']['AnalystAgent'] = "Échec : API Ollama indisponible."
@@ -475,8 +493,8 @@ class AnalystAgent(Agent):
             if 'tags' in data.get('metadata', {}):
                 tag_counter.update(data['metadata']['tags'])
         
-        # On prend les 100 thèmes les plus fréquents comme guide
-        guide_tags = [tag for tag, count in tag_counter.most_common(100)]
+        # TOP 50 thèmes les plus fréquents comme guide
+        guide_tags = [tag for tag, count in tag_counter.most_common(50)]
         if guide_tags:
             self.logger.info(f"Utilisation des {len(guide_tags)} thèmes les plus fréquents comme guide pour l'IA.")
 
@@ -488,6 +506,9 @@ class AnalystAgent(Agent):
         needs_analysis_count = 0
         save_interval = 50
         
+        # Statistiques des réseaux sociaux
+        social_stats = Counter()
+        
         for i, pubkey in enumerate(prospects_to_analyze):
             prospect_data = knowledge_base[pubkey]
             
@@ -497,40 +518,82 @@ class AnalystAgent(Agent):
             
             needs_analysis_count += 1
             profile = prospect_data.get('profile', {})
-            description = (profile.get('_source', {}).get('description') or '').strip()
+            source = profile.get('_source', {})
+            description = (source.get('description') or '').strip()
+            socials = source.get('socials', [])
 
-            if not description:
-                metadata['tags'] = []
-                continue
+            # --- ÉTAPE 1 : Extraire les réseaux sociaux ---
+            social_tags = []
+            for social in socials:
+                social_type = social.get('type', '').lower()
+                if social_type:
+                    # Normaliser les noms des réseaux sociaux
+                    social_mapping = {
+                        'web': 'website',
+                        'facebook': 'facebook',
+                        'email': 'email',
+                        'instagram': 'instagram',
+                        'youtube': 'youtube',
+                        'twitter': 'twitter',
+                        'diaspora': 'diaspora',
+                        'linkedin': 'linkedin',
+                        'github': 'github',
+                        'phone': 'phone',
+                        'vimeo': 'vimeo'
+                    }
+                    
+                    normalized_type = social_mapping.get(social_type, social_type)
+                    if normalized_type not in social_tags:
+                        social_tags.append(normalized_type)
+                        social_stats[normalized_type] += 1
 
-            self.logger.info(f"Analyse thématique {needs_analysis_count}/{len(prospects_to_analyze)} : {prospect_data.get('uid', 'N/A')}")
-            
-            # Construire le prompt guidé avec la liste concise
-            prompt = f"{thematic_prompt_template}\n\nTexte fourni: \"{description}\""
-            if guide_tags:
-                prompt += f"\nThèmes existants : {json.dumps(guide_tags)}"
-            
-            try:
-                ia_response = self._query_ia(prompt, expect_json=True)
-                cleaned_answer = self._clean_ia_json_output(ia_response['answer'])
-                tags = json.loads(cleaned_answer)
-
-                # --- VALIDATION STRICTE ---
-                if not isinstance(tags, list) or len(tags) > 7:
-                    self.logger.warning(f"Réponse IA invalide pour {prospect_data.get('uid')} (format ou trop de tags). Marqué comme erreur.")
-                    metadata['tags'] = ['error']
-                    continue
+            # --- ÉTAPE 2 : Analyse thématique de la description ---
+            thematic_tags = []
+            if description:
+                self.logger.info(f"Analyse thématique {needs_analysis_count}/{len(prospects_to_analyze)} : {prospect_data.get('uid', 'N/A')}")
                 
-                metadata['tags'] = tags
+                # Construire le prompt guidé avec la liste concise
+                prompt = f"{thematic_prompt_template}\n\nTexte fourni: \"{description}\""
+                if guide_tags:
+                    prompt += f"\nThèmes existants : {json.dumps(guide_tags)}"
                 
-                if needs_analysis_count > 0 and needs_analysis_count % save_interval == 0:
-                    self.logger.info(f"--- Sauvegarde intermédiaire de la base de connaissance ({needs_analysis_count} profils analysés)... ---")
-                    self._save_knowledge_base(knowledge_base)
-            except Exception as e:
-                self.logger.error(f"Impossible de tagger le profil {prospect_data.get('uid')} : {e}")
-                metadata['tags'] = ['error']
+                try:
+                    ia_response = self._query_ia(prompt, expect_json=True)
+                    cleaned_answer = self._clean_ia_json_output(ia_response['answer'])
+                    thematic_tags = json.loads(cleaned_answer)
 
-        self.logger.info(f"Analyse thématique terminée. {needs_analysis_count} nouveaux profils ont été taggés. Sauvegarde finale.")
+                    # --- VALIDATION STRICTE ---
+                    if not isinstance(thematic_tags, list) or len(thematic_tags) > 7:
+                        self.logger.warning(f"Réponse IA invalide pour {prospect_data.get('uid')} (format ou trop de tags). Marqué comme erreur.")
+                        thematic_tags = ['error']
+                except Exception as e:
+                    self.logger.error(f"Impossible de tagger le profil {prospect_data.get('uid')} : {e}")
+                    thematic_tags = ['error']
+            else:
+                self.logger.debug(f"Pas de description pour {prospect_data.get('uid', 'N/A')}")
+
+            # --- ÉTAPE 3 : Séparer les tags thématiques et les réseaux sociaux ---
+            # Tags thématiques uniquement (pas de réseaux sociaux mélangés)
+            metadata['tags'] = thematic_tags
+            
+            # Réseaux sociaux dans un champ séparé
+            if social_tags:
+                metadata['web2'] = social_tags
+                self.logger.debug(f"📱 Réseaux sociaux détectés pour {prospect_data.get('uid', 'N/A')} : {', '.join(social_tags)}")
+            else:
+                # Ne pas créer le champ web2 s'il n'y a pas de réseaux sociaux
+                pass
+
+            if needs_analysis_count > 0 and needs_analysis_count % save_interval == 0:
+                self.logger.info(f"--- Sauvegarde intermédiaire de la base de connaissance ({needs_analysis_count} profils analysés)... ---")
+                self._save_knowledge_base(knowledge_base)
+
+        # Afficher les statistiques des réseaux sociaux
+        self.logger.info(f"📊 Statistiques des réseaux sociaux détectés :")
+        for social_type, count in social_stats.most_common():
+            self.logger.info(f"   • {social_type}: {count} profils")
+
+        self.logger.info(f"Analyse thématique enrichie terminée. {needs_analysis_count} nouveaux profils ont été taggés. Sauvegarde finale.")
         self._save_knowledge_base(knowledge_base)
 
         # Agréger les résultats
