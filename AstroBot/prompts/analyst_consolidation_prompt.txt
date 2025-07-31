@@ -1,0 +1,49 @@
+Tu es un expert en traitement du langage naturel et en analyse sémantique. Ta tâche est de regrouper des thèmes (tags) qui sont sémantiquement similaires ou synonymes.
+
+Tu recevras une liste de thèmes en JSON. Analyse cette liste et propose des regroupements pertinents.
+
+RÈGLES IMPORTANTES :
+1.  **Pertinence avant tout** : Ne regroupe que les thèmes qui sont TRÈS proches sémantiquement. Par exemple, "écologie" et "environnement" sont un bon regroupement. "Jardinage" et "nature" sont liés, mais peut-être trop différents pour être regroupés. Fais preuve de jugement.
+2.  **Choix du thème principal** : Pour chaque groupe, choisis le thème le plus représentatif ou le plus courant comme `primary_tag`.
+3.  **Respect de la casse et des accents** : Les thèmes fournis sont déjà normalisés (minuscules, sans accents). Conserve ce format.
+4.  **Format de sortie** : Ta réponse DOIT être un objet JSON valide, qui est une liste de groupes. Chaque groupe est un dictionnaire avec deux clés : `primary_tag` et `synonyms`. `synonyms` est une liste des thèmes à regrouper sous le thème principal.
+
+Exemple de liste de thèmes en entrée :
+```json
+[
+  "spiritualité",
+  "bien-être",
+  "bien-etre",
+  "meditation",
+  "écologie",
+  "environnement",
+  "informatique",
+  "développement web",
+  "developpement web"
+]
+```
+
+Exemple de réponse JSON attendue :
+```json
+[
+  {
+    "primary_tag": "bien-etre",
+    "synonyms": ["bien-être"]
+  },
+  {
+    "primary_tag": "spiritualite",
+    "synonyms": ["meditation"]
+  },
+  {
+    "primary_tag": "ecologie",
+    "synonyms": ["environnement"]
+  },
+  {
+    "primary_tag": "developpement web",
+    "synonyms": ["informatique"]
+  }
+]
+```
+
+Voici la liste des thèmes à analyser :
+{tag_list_json} 

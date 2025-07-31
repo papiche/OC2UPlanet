@@ -1384,7 +1384,29 @@ Le persona doit être adapté au thème "{theme}" et aux personnes intéressées
 
         # Remplacer tag_counts par les comptes normalisés pour la suite du traitement
         tag_counts = normalized_tag_counts
-        unique_tags = unique_tags_after
+        
+        # --- NOUVELLE ÉTAPE : Consolidation sémantique interactive ---
+        consolidation_map = self._get_interactive_tag_consolidation(list(tag_counts.keys()))
+
+        if consolidation_map:
+            self.logger.info("🔄 Application des consolidations sémantiques validées...")
+            
+            # Appliquer la consolidation aux comptes de thèmes
+            consolidated_tag_counts = Counter()
+            for tag, count in tag_counts.items():
+                final_tag = consolidation_map.get(tag, tag)
+                consolidated_tag_counts[final_tag] += count
+            tag_counts = consolidated_tag_counts
+
+            # Mettre à jour la carte de mappage pour pointer les thèmes originaux vers leur version finale consolidée
+            for original_tag, normalized_tag in tag_map.items():
+                final_tag = consolidation_map.get(normalized_tag, normalized_tag)
+                tag_map[original_tag] = final_tag
+
+            unique_tags_after_consolidation = len(tag_counts)
+            self.logger.info(f"📊 {unique_tags_after_consolidation} thèmes uniques après consolidation sémantique.")
+
+        unique_tags = len(tag_counts)
         
         # Filtrer les thèmes avec moins de 3 occurrences
         filtered_tags = {tag: count for tag, count in tag_counts.items() if count >= 3}
@@ -1438,6 +1460,95 @@ Le persona doit être adapté au thème "{theme}" et aux personnes intéressées
             self.logger.info(f"  {i:>2}. {tag:<20} ({count:>4} occurrences)")
         
         self.logger.info(f"✅ Optimisation terminée ! {len(filtered_tags)} thèmes conservés sur {unique_tags_before} initiaux.")
+
+    def _get_interactive_tag_consolidation(self, tags: list) -> dict:
+        """
+        Utilise l'IA pour suggérer un regroupement sémantique des thèmes et demande une validation à l'utilisateur.
+        Retourne une carte de consolidation {'ancien_theme': 'nouveau_theme'}.
+        """
+        if len(tags) < 10: # Pas assez de thèmes pour les regrouper
+            return {}
+
+        self.logger.info("🤖 Lancement de l'IA pour proposer des regroupements sémantiques de thèmes...")
+        
+        # 1. Interroger l'IA
+        prompt_template = self._load_prompt('analyst_consolidation_prompt_file')
+        if not prompt_template:
+            self.logger.warning("Le prompt de consolidation des thèmes n'est pas trouvé. Étape de consolidation sémantique ignorée.")
+            return {}
+        
+        prompt = prompt_template.replace('{tag_list_json}', json.dumps(tags, indent=2))
+        
+        try:
+            ia_response = self._query_ia(prompt, expect_json=True)
+            cleaned_answer = self._clean_ia_json_output(ia_response['answer'])
+            suggested_groups = json.loads(cleaned_answer)
+            
+            if not isinstance(suggested_groups, list):
+                self.logger.warning("La réponse de l'IA pour le regroupement de thèmes n'est pas une liste.")
+                return {}
+                
+        except Exception as e:
+            self.logger.error(f"Erreur lors de la récupération des regroupements de thèmes via l'IA : {e}")
+            return {}
+
+        if not suggested_groups:
+            self.logger.info("L'IA n'a suggéré aucun regroupement de thèmes.")
+            return {}
+            
+        # 2. Validation par l'utilisateur
+        self.logger.info("Veuillez valider les regroupements de thèmes proposés par l'IA.")
+        consolidation_map = {}
+        accept_all = False
+        
+        for i, group in enumerate(suggested_groups):
+            primary_tag = group.get('primary_tag')
+            synonyms = group.get('synonyms')
+            
+            if not primary_tag or not synonyms or not isinstance(synonyms, list):
+                continue
+
+            # Ne pas proposer de regrouper un thème avec lui-même ou des thèmes déjà consolidés
+            synonyms = [s for s in synonyms if s != primary_tag and s not in consolidation_map]
+            if not synonyms:
+                continue
+
+            print("\n" + "="*50)
+            print(f"Suggestion de regroupement {i+1}/{len(suggested_groups)}:")
+            print(f"  Thème principal : '{primary_tag}'")
+            print(f"  Regrouper avec   : {', '.join(synonyms)}")
+            print("="*50)
+            
+            if accept_all:
+                print("Accepté automatiquement (mode 'tout accepter').")
+                for synonym in synonyms:
+                    consolidation_map[synonym] = primary_tag
+                continue
+
+            while True:
+                choice = input("Accepter ce regroupement ? [O]ui / [N]on / [T]out accepter / [A]rrêter : ").strip().lower()
+                if choice in ['o', 'oui', 'y', 'yes']:
+                    for synonym in synonyms:
+                        consolidation_map[synonym] = primary_tag
+                    self.logger.info(f"✅ Regroupement accepté pour '{primary_tag}'.")
+                    break
+                elif choice in ['n', 'non', 'no']:
+                    self.logger.info("❌ Regroupement refusé.")
+                    break
+                elif choice in ['t', 'tout', 'all']:
+                    self.logger.info("✅ Mode 'Tout accepter' activé. Les regroupements restants seront acceptés.")
+                    accept_all = True
+                    # Accepter aussi le regroupement actuel
+                    for synonym in synonyms:
+                        consolidation_map[synonym] = primary_tag
+                    break
+                elif choice in ['a', 'arrêter', 'q', 'quit']:
+                    self.logger.info("🛑 Validation des regroupements arrêtée par l'utilisateur.")
+                    return consolidation_map
+                else:
+                    print("Choix invalide. Veuillez répondre par 'o', 'n', 't' ou 'a'.")
+
+        return consolidation_map
 
     def advanced_multi_selection_targeting(self):
         """

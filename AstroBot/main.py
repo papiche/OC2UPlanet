@@ -31,6 +31,7 @@ class AstroBotOrchestrator:
                 "analyst_deep_dive_prompt_file": os.path.join(script_dir, "prompts", "analyst_deep_dive_prompt.txt"),
                 "analyst_language_prompt_file": os.path.join(script_dir, "prompts", "analyst_language_prompt.txt"),
                 "analyst_thematic_prompt_file": os.path.join(script_dir, "prompts", "analyst_thematic_prompt.txt"),
+                "analyst_consolidation_prompt_file": os.path.join(script_dir, "prompts", "analyst_consolidation_prompt.txt"),
                 
                 # --- Configuration des canaux de communication ---
                 "cesium_node": "https://g1.data.e-is.pro",   # Nœud Cesium+ à utiliser
