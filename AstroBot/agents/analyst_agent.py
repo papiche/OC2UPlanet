@@ -1175,13 +1175,27 @@ Le persona doit être adapté au thème "{theme}" et aux personnes intéressées
             command.append('--json')
         
         self.logger.debug(f"Exécution de la commande IA : {' '.join(command[:2])}...")
-        result = subprocess.run(command, capture_output=True, text=True, check=True)
+        self.logger.info("📞 Interrogation de l'IA en cours... Le traitement du prompt peut être long.")
+        self.logger.debug(f"Taille du prompt: {len(prompt)} caractères.")
+        start_time = time.time()
 
-        self.logger.debug(f"Réponse brute de l'IA reçue : {result.stdout.strip()}")
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, check=True)
+            
+            end_time = time.time()
+            self.logger.info(f"✅ Réponse de l'IA reçue en {end_time - start_time:.2f} secondes.")
+            self.logger.debug(f"Réponse brute de l'IA reçue : {result.stdout.strip()}")
 
-        if expect_json:
-            return json.loads(result.stdout)
-        return result.stdout
+            if expect_json:
+                return json.loads(result.stdout)
+            return result.stdout
+
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"❌ Le script d'IA a retourné une erreur.")
+            self.logger.error(f"   Code de retour : {e.returncode}")
+            self.logger.error(f"   Sortie standard (stdout) : {e.stdout.strip()}")
+            self.logger.error(f"   Sortie d'erreur (stderr) : {e.stderr.strip()}")
+            return None
 
     def _load_prompt(self, prompt_key):
         try:
