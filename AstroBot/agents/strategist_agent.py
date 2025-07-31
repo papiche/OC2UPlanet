@@ -959,25 +959,26 @@ Format : Message de 150-200 mots maximum."""
         # Charger la configuration des liens depuis le fichier
         links_config = self._load_links_config()
 
-        # Patterns de détection des placeholders
+        # Patterns de détection des placeholders avec gestion des caractères collés
+        # Le pattern capture le placeholder ET les caractères collés après le ]
         link_patterns = {
-            r'\[Lien vers OpenCollective\]': links_config.get('opencollective', ''),
-            r'\[Lien vers Documentation\]': links_config.get('documentation', ''),
-            r'\[Lien vers GitHub\]': links_config.get('github', ''),
-            r'\[Lien vers Discord\]': links_config.get('discord', ''),
-            r'\[Lien vers Telegram\]': links_config.get('telegram', ''),
-            r'\[Lien vers Site Web\]': links_config.get('website', ''),
-            r'\[Lien vers Blog\]': links_config.get('blog', ''),
-            r'\[Lien vers Forum\]': links_config.get('forum', ''),
-            r'\[Lien vers Wiki\]': links_config.get('wiki', ''),
-            r'\[Lien vers Mastodon\]': links_config.get('mastodon', ''),
-            r'\[Lien vers Nostr\]': links_config.get('nostr', ''),
-            r'\[Lien vers IPFS\]': links_config.get('ipfs', ''),
-            r'\[Lien vers G1\]': links_config.get('g1', ''),
-            r'\[Lien vers UPlanet\]': links_config.get('uplanet', ''),
-            r'\[Lien vers Astroport\]': links_config.get('astroport', ''),
-            r'\[Lien vers Zen\]': links_config.get('zen', ''),
-            r'\[Lien vers Multipass\]': links_config.get('multipass', ''),
+            r'\[Lien vers OpenCollective\]([^\w\s]*)': links_config.get('opencollective', ''),
+            r'\[Lien vers Documentation\]([^\w\s]*)': links_config.get('documentation', ''),
+            r'\[Lien vers GitHub\]([^\w\s]*)': links_config.get('github', ''),
+            r'\[Lien vers Discord\]([^\w\s]*)': links_config.get('discord', ''),
+            r'\[Lien vers Telegram\]([^\w\s]*)': links_config.get('telegram', ''),
+            r'\[Lien vers Site Web\]([^\w\s]*)': links_config.get('website', ''),
+            r'\[Lien vers Blog\]([^\w\s]*)': links_config.get('blog', ''),
+            r'\[Lien vers Forum\]([^\w\s]*)': links_config.get('forum', ''),
+            r'\[Lien vers Wiki\]([^\w\s]*)': links_config.get('wiki', ''),
+            r'\[Lien vers Mastodon\]([^\w\s]*)': links_config.get('mastodon', ''),
+            r'\[Lien vers Nostr\]([^\w\s]*)': links_config.get('nostr', ''),
+            r'\[Lien vers IPFS\]([^\w\s]*)': links_config.get('ipfs', ''),
+            r'\[Lien vers G1\]([^\w\s]*)': links_config.get('g1', ''),
+            r'\[Lien vers UPlanet\]([^\w\s]*)': links_config.get('uplanet', ''),
+            r'\[Lien vers Astroport\]([^\w\s]*)': links_config.get('astroport', ''),
+            r'\[Lien vers Zen\]([^\w\s]*)': links_config.get('zen', ''),
+            r'\[Lien vers Multipass\]([^\w\s]*)': links_config.get('multipass', ''),
         }
 
         # Remplacer les placeholders par les vrais liens
@@ -985,7 +986,7 @@ Format : Message de 150-200 mots maximum."""
             if link:
                 message = re.sub(pattern, link, message, flags=re.IGNORECASE)
             else:
-                # Si le lien n'est pas configuré, supprimer le placeholder
+                # Si le lien n'est pas configuré, supprimer le placeholder et les caractères collés
                 message = re.sub(pattern, '', message, flags=re.IGNORECASE)
 
         # Nettoyer les espaces multiples créés par les suppressions
