@@ -1385,7 +1385,8 @@ ANALYSE :"""
             if bank_match:
                 bank_index = int(bank_match.group(1))
                 self.logger.debug(f"🔍 Numéro de persona extrait : {bank_index} (/{len(available_banks)})")
-                self.logger.debug(f"🔍 Banques disponibles : {[f'{slot}:{bank['name']}' for slot, bank in available_banks]}")
+                bank_list = [f"{slot}:{bank['name']}" for slot, bank in available_banks]
+                self.logger.debug(f"🔍 Banques disponibles : {bank_list}")
                 
                 if 0 <= bank_index < len(available_banks):
                     selected_slot, selected_bank = available_banks[bank_index]
@@ -1403,7 +1404,8 @@ ANALYSE :"""
                     return selected_bank
                 else:
                     self.logger.warning(f"⚠️ Index de persona invalide : {bank_index} (max: {len(available_banks)-1})")
-                    self.logger.debug(f"🔍 Banques disponibles : {[f'{slot}:{bank['name']}' for slot, bank in available_banks]}")
+                    bank_list = [f"{slot}:{bank['name']}" for slot, bank in available_banks]
+                    self.logger.debug(f"🔍 Banques disponibles : {bank_list}")
             else:
                 self.logger.warning("⚠️ Impossible de déterminer le persona depuis l'analyse IA")
                 self.logger.debug(f"🔍 Réponse qui n'a pas de numéro : {analysis_result}")
