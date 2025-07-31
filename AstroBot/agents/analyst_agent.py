@@ -196,10 +196,24 @@ class AnalystAgent(Agent):
                     
                     if geo_data:
                         meta = prospect_data.setdefault('metadata', {})
-                        meta['language'] = geo_data.get('language', 'xx')
-                        meta['country'] = geo_data.get('country')
-                        meta['region'] = geo_data.get('region')
-                        meta['city'] = geo_data.get('city')
+                        
+                        # Ne pas écrire les champs si les valeurs sont inconnues
+                        language = geo_data.get('language', 'xx')
+                        if language != 'xx':
+                            meta['language'] = language
+                        
+                        country = geo_data.get('country')
+                        if country:
+                            meta['country'] = country
+                        
+                        region = geo_data.get('region')
+                        if region:
+                            meta['region'] = region
+                        
+                        city = geo_data.get('city')
+                        if city:
+                            meta['city'] = city
+                        
                         meta['geolocation_source'] = 'gps_service'
                         
                         gps_geolocated += 1
@@ -223,9 +237,20 @@ class AnalystAgent(Agent):
                     geo_data = json.loads(cleaned_answer)
                     
                     meta = prospect_data.setdefault('metadata', {})
-                    meta['language'] = geo_data.get('language', 'xx')
-                    meta['country'] = geo_data.get('country')
-                    meta['region'] = geo_data.get('region')
+                    
+                    # Ne pas écrire les champs si les valeurs sont inconnues
+                    language = geo_data.get('language', 'xx')
+                    if language != 'xx':
+                        meta['language'] = language
+                    
+                    country = geo_data.get('country')
+                    if country:
+                        meta['country'] = country
+                    
+                    region = geo_data.get('region')
+                    if region:
+                        meta['region'] = region
+                    
                     meta['geolocation_source'] = 'ia_analysis'
                     
                     ia_analyzed += 1
@@ -235,19 +260,8 @@ class AnalystAgent(Agent):
                         self._save_knowledge_base(knowledge_base)
                 except Exception as e:
                     self.logger.error(f"Impossible de géo-classifier le profil {prospect_data.get('uid')} : {e}")
-                    meta = prospect_data.setdefault('metadata', {})
-                    meta['language'] = 'xx'
-                    meta['country'] = None
-                    meta['region'] = None
-                    meta['geolocation_source'] = 'failed'
-            else:
-                # Pas de description ni de GPS
-                meta = prospect_data.setdefault('metadata', {})
-                meta['language'] = 'xx'
-                meta['country'] = None
-                meta['region'] = None
-                meta['geolocation_source'] = 'no_data'
-                skipped += 1
+                    # En cas d'erreur, ne pas écrire de métadonnées vides
+                    skipped += 1
 
         self.logger.info(f"✅ Analyse Géo-Linguistique terminée.")
         self.logger.info(f"📊 Statistiques :")
