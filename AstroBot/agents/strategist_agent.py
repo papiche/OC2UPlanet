@@ -1069,14 +1069,14 @@ Format : Message de 150-200 mots maximum."""
         # Configuration par défaut
         default_links = {
             'opencollective': 'https://opencollective.com/monnaie-libre',
-            'documentation': 'https://github.com/papiche/Astroport.ONE/blob/master/DOCUMENTATION.md',
+            'documentation': 'https://github.com/papiche/Astroport.ONE/blob/master/WELCOME.md',
             'github': 'https://github.com/papiche/Astroport.ONE',
             'discord': 'https://ipfs.copylaradio.com/ipns/copylaradio.com/bang.html',
             'telegram': 'https://t.me/AstroportN1',
-            'website': 'https://copylaradio.com',
+            'website': 'https://www.copylaradio.com',
             'blog': 'https://www.copylaradio.com/blog/blog-1',
             'forum': 'https://forum.monnaie-libre.fr/',
-            'wiki': 'https://pad.p2p.legal',
+            'wiki': 'https://pad.p2p.legal/wiki',
             'mastodon': 'https://mastodon.social/@qoop',
             'nostr': 'https://fr.wikipedia.org/wiki/Nostr',
             'ipfs': 'https://fr.wikipedia.org/wiki/InterPlanetary_File_System',
