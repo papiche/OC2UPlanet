@@ -39,7 +39,7 @@ class AstroBotOrchestrator:
                 "question_script": os.path.join(astroport_one_path, "IA", "question.py"),
                 "jaklis_script": os.path.join(astroport_one_path, "tools", "jaklis", "jaklis.py"),
                 "mailjet_script": os.path.join(astroport_one_path, "tools", "mailjet.sh"),
-                "nostr_dm_script": os.path.join(astroport_one_path, "tools", "nostr_send_DM.py"),
+                "nostr_dm_script": os.path.join(astroport_one_path, "tools", "nostr_send_dm.py"),
                 "uplanet_nsec": "nsec1...", # A REMPLACER
                 "ollama_script": os.path.join(astroport_one_path, "IA", "ollama.me.sh"),
                 "perplexica_script_connector": os.path.join(astroport_one_path, "IA", "perplexica.me.sh"),

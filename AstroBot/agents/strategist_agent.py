@@ -150,10 +150,11 @@ class StrategistAgent(Agent):
                 self.logger.info("📝 Mode Classique : Choix manuel du persona")
                 message_content = self._generate_personalized_message_with_classic_mode(banks_config, treasury_pubkey, target)
 
-            if message_content:
+            if message_content and 'title' in message_content and 'text' in message_content:
                 personalized_messages.append({
                     'target': target,
-                    'message': message_content,
+                    'title': message_content['title'],
+                    'message': message_content['text'],
                     'mode': mode
                 })
                 self.logger.info(f"✅ Message personnalisé généré pour {target.get('uid', 'Unknown')}")
@@ -170,12 +171,7 @@ class StrategistAgent(Agent):
         with open(messages_file, 'w', encoding='utf-8') as f:
             json.dump(personalized_messages, f, indent=2, ensure_ascii=False)
 
-        # Sauvegarder aussi le premier message comme message générique (pour compatibilité)
-        message_file = os.path.join(self.shared_state['config']['workspace'], "message_to_send.txt")
-        with open(message_file, 'w', encoding='utf-8') as f:
-            f.write(personalized_messages[0]['message'])
-
-        report = f"{len(personalized_messages)} messages personnalisés générés et sauvegardés. Prêt pour validation par l'Opérateur."
+        report = f"{len(personalized_messages)} messages personnalisés générés et sauvegardés dans personalized_messages.json. Prêt pour validation par l'Opérateur."
         self.logger.info(f"✅ {report}")
         self.shared_state['status']['StrategistAgent'] = report
         self.shared_state['personalized_messages'] = personalized_messages
@@ -819,12 +815,22 @@ class StrategistAgent(Agent):
                 print(f"\n⚠️ Aucun lien configuré. Les placeholders seront supprimés.")
 
             # Générer le message
-            message = self._generate_message_with_bank(bank, self.shared_state['config'])
+            test_target_description = "Ceci est un test pour le persona. Le prospect est un utilisateur générique intéressé par UPlanet."
+            message_obj = self._generate_message_with_bank(bank, test_target_description)
 
             print(f"\n{'='*50}")
             print(f"MESSAGE GÉNÉRÉ :")
             print(f"{'='*50}")
-            print(message)
+
+            if message_obj and 'title' in message_obj and 'text' in message_obj:
+                print(f"Titre: {message_obj['title']}")
+                print("-" * 20)
+                print(message_obj['text'])
+                message = message_obj['text']
+            else:
+                print("Erreur de génération du message.")
+                message = ""
+            
             print(f"{'='*50}")
 
             # Afficher les statistiques du message
@@ -918,32 +924,28 @@ RÈGLE STRICTE : N'écris JAMAIS d'URLs complètes comme "https://..." dans ton 
 Exemple correct : "Rejoignez-nous sur [Lien vers Discord]"
 Exemple INCORRECT : "Rejoignez-nous sur https://discord.gg/uplanet"
 
-Format : Message de 150-200 mots maximum."""
+Format de sortie : Ta réponse DOIT être un objet JSON valide avec deux clés :
+1. "title": un titre court et percutant pour le message (5-10 mots maximum).
+2. "text": le corps du message (150-200 mots maximum).
+
+Exemple de format de sortie :
+{{
+  "title": "Invitation à co-créer le futur numérique",
+  "text": "Bonjour {{uid}}, nous avons vu votre intérêt pour les technologies décentralisées et nous pensons que UPlanet pourrait vous passionner..."
+}}"""
 
         try:
-            message_content = self._call_ia_for_writing(prompt, target_language)
-            if not message_content:
-                return "Erreur lors de la génération du message"
+            raw_response = self._call_ia_for_writing(prompt, target_language)
+            message_data = self._parse_ai_message_response(raw_response)
             
-            # Essayer de parser comme JSON si possible
-            try:
-                response = json.loads(message_content)
-                message_content = response.get('answer', message_content)
-            except json.JSONDecodeError:
-                # Si ce n'est pas du JSON, utiliser directement
-                pass
-
-            # Vérifier si l'agent a utilisé des URLs directes
-            direct_urls = re.findall(r'https?://[^\s]+', message_content)
-            if direct_urls:
-                self.logger.warning(f"⚠️ L'agent a utilisé des URLs directes au lieu des placeholders : {direct_urls}")
-                # Remplacer les URLs directes par des placeholders appropriés
-                message_content = self._replace_direct_urls_with_placeholders(message_content)
-
-            return self._inject_links(message_content, self.shared_state['config'])
+            # Inject links into the text part
+            if message_data and 'text' in message_data:
+                message_data['text'] = self._inject_links(message_data['text'], self.shared_state['config'])
+            
+            return message_data
         except Exception as e:
             self.logger.error(f"Erreur lors de la génération avec persona : {e}")
-            return f"Erreur lors de la génération : {e}"
+            return {"title": "Erreur de génération", "text": f"Une erreur est survenue: {e}"}
 
     def _save_banks_config(self, banks_config, config_file):
         """Sauvegarde la configuration des personas"""
@@ -1664,3 +1666,27 @@ INSTRUCTIONS DE PERSONNALISATION :
     def _generate_message_with_classic_mode(self, banks_config, treasury_pubkey):
         """Génère un message en mode Classique avec choix manuel de persona (méthode legacy)"""
         return self._generate_personalized_message_with_classic_mode(banks_config, treasury_pubkey, self.shared_state['targets'][0])
+
+    def _parse_ai_message_response(self, raw_response: str) -> dict:
+        """Parses the JSON response from the AI to extract title and text."""
+        if not raw_response:
+            return {"title": "Invitation UPlanet", "text": "Aucun message n'a été généré."}
+
+        # The AI might wrap the JSON in markdown ```json ... ``` or just be noisy.
+        # We look for the first '{' and the last '}' to extract the JSON object.
+        match = re.search(r'\{.*\}', raw_response, re.DOTALL)
+        if not match:
+            self.logger.warning(f"No JSON object found in AI response. Response was: {raw_response}")
+            return {"title": "Invitation UPlanet", "text": raw_response}
+        
+        clean_json_str = match.group(0)
+
+        try:
+            message_data = json.loads(clean_json_str)
+            if not isinstance(message_data, dict) or 'title' not in message_data or 'text' not in message_data:
+                self.logger.warning(f"AI response is not a valid message object: {message_data}")
+                return {"title": "Invitation UPlanet", "text": raw_response}
+            return message_data
+        except json.JSONDecodeError:
+            self.logger.warning(f"Failed to parse AI JSON response. Cleaned string was: {clean_json_str}")
+            return {"title": "Invitation UPlanet", "text": raw_response}

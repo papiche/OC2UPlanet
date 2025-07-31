@@ -21,7 +21,8 @@ class OperatorAgent(Agent):
         
         # Remplacer les placeholders
         message = template.replace("{{uid}}", target.get('uid', ''))
-        message = message.replace("[URL_OPEN_COLLECTIVE]", url_oc)
+        # NOTE: The [URL_OPEN_COLLECTIVE] is already replaced by the StrategistAgent
+        # message = message.replace("[URL_OPEN_COLLECTIVE]", url_oc)
         
         # Ajouter l'opt-out
         message += opt_out_message
@@ -63,31 +64,33 @@ class OperatorAgent(Agent):
 
         # --- 1. Vérifier les prérequis ---
         workspace = self.shared_state['config']['workspace']
-        targets_file = os.path.join(workspace, 'todays_targets.json')
-        message_file = os.path.join(workspace, 'message_to_send.txt')
+        messages_file = os.path.join(workspace, 'personalized_messages.json')
 
-        if not os.path.exists(targets_file) or not os.path.exists(message_file):
-            self.logger.error("❌ Fichiers de cibles ou de message manquants.")
-            print("❌ Fichiers de cibles ou de message manquants.")
-            self.shared_state['status']['OperatorAgent'] = "Échec : Prérequis manquants."
+        if not os.path.exists(messages_file):
+            self.logger.error("❌ Fichier de messages personnalisés manquant. Lancez l'Agent Stratège d'abord.")
+            print("❌ Fichier 'personalized_messages.json' manquant.")
+            self.shared_state['status']['OperatorAgent'] = "Échec : Fichier de messages manquant."
             return
 
         # --- 2. Charger les données ---
         try:
-            with open(targets_file, 'r') as f: targets = json.load(f)
-            with open(message_file, 'r') as f: message_template = f.read()
+            with open(messages_file, 'r', encoding='utf-8') as f:
+                campaign_data = json.load(f)
         except Exception as e:
-            self.logger.error(f"❌ Erreur de lecture des fichiers : {e}")
-            print(f"❌ Erreur de lecture des fichiers : {e}")
-            self.shared_state['status']['OperatorAgent'] = "Échec : Fichiers corrompus."
+            self.logger.error(f"❌ Erreur de lecture du fichier de messages : {e}")
+            print(f"❌ Erreur de lecture du fichier de messages : {e}")
+            self.shared_state['status']['OperatorAgent'] = "Échec : Fichier corrompu."
             return
 
-        if not targets:
-            self.logger.warning("⚠️ Aucune cible sélectionnée.")
-            print("⚠️ Aucune cible sélectionnée.")
+        if not campaign_data:
+            self.logger.warning("⚠️ Aucune cible dans le fichier de campagne.")
+            print("⚠️ Aucune cible dans le fichier de campagne.")
             self.shared_state['status']['OperatorAgent'] = "Terminé : Aucune cible."
             return
 
+        # Extraire les cibles et les messages pour la validation et l'information de campagne
+        targets = [item['target'] for item in campaign_data]
+        
         # --- 3. Sélection du canal ---
         print("\n📡 Choisissez le canal d'envoi :")
         print("1. Jaklis (Message privé Cesium+)")
@@ -106,8 +109,8 @@ class OperatorAgent(Agent):
         }.get(channel_choice, 'Inconnu')
         
         # Préparer un exemple de message pour l'aperçu
-        example_target = targets[0] if targets else {"uid": "Exemple"}
-        final_message_preview = self._prepare_message(message_template, example_target)
+        example_item = campaign_data[0] if campaign_data else {'target': {"uid": "Exemple"}, 'message': "Message d'exemple.", 'title': 'Titre d\'exemple'}
+        final_message_preview = self._prepare_message(example_item['message'], example_item['target'])
 
         print("\n" + "="*60)
         print("           📤 VALIDATION FINALE")
@@ -115,7 +118,9 @@ class OperatorAgent(Agent):
         print(f"📡 Canal : {channel_name}")
         print(f"🎯 Cibles : {len(targets)}")
         print(f"⏱️  Délai : {self.shared_state['config']['send_delay_seconds']} secondes")
-        print("\n--- MESSAGE QUI SERA ENVOYÉ ---")
+        print("\n--- EXEMPLE DE MESSAGE QUI SERA ENVOYÉ ---")
+        print(f"Titre : {example_item['title']}")
+        print(f"---")
         print(final_message_preview)
         print("--- FIN DU MESSAGE ---")
 
@@ -140,15 +145,16 @@ class OperatorAgent(Agent):
             return
         
         # Sauvegarder les informations de la campagne
-        self._save_campaign_info(available_slot, targets, message_template)
+        # Utilise le premier message comme aperçu pour la campagne
+        self._save_campaign_info(available_slot, targets, campaign_data[0]['message'] if campaign_data else "")
         
         # Démarrer la campagne pour de bon
         if channel_choice == '1':
-            self.send_with_jaklis(targets, message_template, available_slot)
+            self.send_with_jaklis(campaign_data, available_slot)
         elif channel_choice == '2':
-            self.send_with_mailjet(targets, message_template, available_slot)
+            self.send_with_mailjet(campaign_data, available_slot)
         elif channel_choice == '3':
-            self.send_with_nostr(targets, message_template, available_slot)
+            self.send_with_nostr(campaign_data, available_slot)
         else:
             self.logger.error("Choix de canal invalide.")
             self.shared_state['status']['OperatorAgent'] = "Échec : Canal invalide."
@@ -774,7 +780,7 @@ class OperatorAgent(Agent):
             self.logger.error(f"Erreur lors de l'exécution de la commande. Sortie d'erreur :\n{e.stderr}", exc_info=True)
             return False
 
-    def send_with_jaklis(self, targets, message_template, slot=0):
+    def send_with_jaklis(self, campaign_data, slot=0):
         jaklis_script = self.shared_state['config']['jaklis_script']
         cesium_node = self.shared_state['config']['cesium_node']
 
@@ -795,14 +801,17 @@ class OperatorAgent(Agent):
             self.shared_state['status']['OperatorAgent'] = "Échec : Clé secrète introuvable."
             return
 
-        opt_out_message = "\n\n---\nPour ne plus recevoir de messages, répondez simplement 'STOP'."
         success = 0
         failures = 0
 
         self.logger.info(f"🚀 Démarrage de la campagne via Jaklis (authentifié)...")
-        for i, target in enumerate(targets):
+        for i, item in enumerate(campaign_data):
+            target = item['target']
+            message_template = item['message']
+            
             uid = target.get('uid', 'N/A')
             pubkey = target.get('pubkey')
+            title = item.get('title', 'Invitation UPlanet') # Utiliser le titre du message
 
             if not pubkey:
                 self.logger.warning(f"Cible {uid} ignorée (pas de clé publique).")
@@ -811,9 +820,8 @@ class OperatorAgent(Agent):
 
             # Utiliser la méthode centralisée pour préparer le message
             personalized_message = self._prepare_message(message_template, target)
-            title = "Invitation UPlanet"
             
-            self.logger.info(f"--- Envoi Jaklis {i+1}/{len(targets)} à {uid} ---")
+            self.logger.info(f"--- Envoi Jaklis {i+1}/{len(campaign_data)} à {uid} ---")
             
             # On passe le message par un fichier temporaire pour éviter les problèmes avec les caractères spéciaux
             with tempfile.NamedTemporaryFile(mode='w+', delete=True, suffix=".txt") as tmp_file:
@@ -843,28 +851,30 @@ class OperatorAgent(Agent):
         self.logger.info(f"==================================================\n✅ {report}\n==================================================")
         self.shared_state['status']['OperatorAgent'] = report
     
-    def send_with_mailjet(self, targets, message_template, slot=0):
+    def send_with_mailjet(self, campaign_data, slot=0):
         self.logger.info("🚀 Démarrage de la campagne via Mailjet...")
         self.shared_state['status']['OperatorAgent'] = "Envoi via Mailjet..."
         mailjet_script = self.shared_state['config']['mailjet_script']
-        url_oc = self.shared_state['config']['URL_OPEN_COLLECTIVE']
         success, failure = 0, 0
 
-        for i, target in enumerate(targets):
+        for i, item in enumerate(campaign_data):
+            target = item['target']
+            message_template = item['message']
+            title = item.get('title', 'Votre invitation pour UPlanet') # Utiliser le titre du message
+
             email = target.get('email')
             if not email:
                 self.logger.warning(f"Cible {target.get('uid', 'N/A')} ignorée (email manquant)."); failure+=1; continue
 
-            personalized_message = message_template.replace('[URL_OPEN_COLLECTIVE]', url_oc)
-            for key, value in target.items(): personalized_message = personalized_message.replace(f'[{key}]', str(value))
+            personalized_message = self._prepare_message(message_template, target)
 
-            self.logger.info(f"--- Envoi Mailjet {i+1}/{len(targets)} à {email} ---")
+            self.logger.info(f"--- Envoi Mailjet {i+1}/{len(campaign_data)} à {email} ---")
             try:
                 with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix=".txt", encoding='utf-8') as tmp:
                     tmp.write(personalized_message)
                     tmp_path = tmp.name
 
-                command = ['bash', mailjet_script, email, tmp_path, "Votre invitation pour UPlanet"]
+                command = ['bash', mailjet_script, email, tmp_path, title]
                 self.logger.debug(f"Exécution Mailjet : {' '.join(command)}")
                 self.execute_command(command)
                 success += 1
@@ -873,52 +883,76 @@ class OperatorAgent(Agent):
             except Exception as e:
                 self.logger.error(f"Échec de l'envoi à {email}: {e}", exc_info=True); failure+=1
 
-            if i < len(targets) - 1: time.sleep(self.shared_state['config'].get('send_delay_seconds', 2))
+            if i < len(campaign_data) - 1: time.sleep(self.shared_state['config'].get('send_delay_seconds', 2))
 
         self.finalize_campaign("Mailjet", success, failure)
 
-    def send_with_nostr(self, targets, message_template, slot=0):
+    def send_with_nostr(self, campaign_data, slot=0):
         self.logger.info("🚀 Démarrage de la campagne via Nostr (DM)...")
         self.shared_state['status']['OperatorAgent'] = "Envoi via Nostr (DM)..."
         nostr_script = os.path.abspath(self.shared_state['config']['nostr_dm_script'])
-        sender_nsec = self.shared_state['config'].get('uplanet_nsec')
 
-        if not sender_nsec or sender_nsec == "nsec1...":
-            self.logger.error("Configuration NSEC manquante ou non initialisée. L'envoi Nostr est impossible.")
-            self.finalize_campaign("Nostr", 0, len(targets))
+        # Obtenir la clé NSEC de l'expéditeur de manière dynamique
+        try:
+            captain_email_file = os.path.expanduser("~/.zen/game/players/.current/.player")
+            with open(captain_email_file, 'r') as f:
+                captain_email = f.read().strip()
+            if not captain_email: raise FileNotFoundError("L'e-mail du capitaine est vide.")
+        except (IOError, FileNotFoundError) as e:
+            self.logger.error(f"Impossible de lire l'e-mail du capitaine : {e}")
+            self.shared_state['status']['OperatorAgent'] = "Échec : E-mail du capitaine introuvable."
+            return
+
+        secret_file_path = os.path.expanduser(f"~/.zen/game/nostr/{captain_email}/.secret.nostr")
+        if not os.path.exists(secret_file_path):
+            self.logger.error(f"Le fichier de clé secrète Nostr n'existe pas : {secret_file_path}")
+            self.shared_state['status']['OperatorAgent'] = "Échec : Fichier de clé secrète Nostr introuvable."
+            return
+
+        nostr_keys = self._parse_nostr_secret(secret_file_path)
+        sender_nsec = nostr_keys.get('NSEC')
+
+        if not sender_nsec:
+            self.logger.error(f"Impossible d'extraire la clé NSEC depuis {secret_file_path}")
+            self.shared_state['status']['OperatorAgent'] = "Échec : Clé NSEC de l'expéditeur introuvable."
             return
 
         success, failure = 0, 0
 
-        for i, target in enumerate(targets):
+        for i, item in enumerate(campaign_data):
+            target = item['target']
+            message_template = item['message']
+            title = item.get('title', 'Invitation UPlanet')
+
             email = target.get('email')
             if not email:
-                self.logger.warning(f"Cible {target.get('uid', 'N/A')} ignorée (email manquant pour la détection)."); failure+=1; continue
+                self.logger.warning(f"Cible {target.get('uid', 'N/A')} ignorée (e-mail manquant pour la détection)."); failure+=1; continue
 
             # Détecter si le prospect a un MULTIPASS
             multipass_dir = os.path.expanduser(f"~/.zen/game/nostr/{email}")
             npub_file = os.path.join(multipass_dir, 'NPUB')
 
             if os.path.isdir(multipass_dir) and os.path.isfile(npub_file):
-                with open(npub_file, 'r') as f:
-                    recipient_npub = f.read().strip()
+                recipient_hex = target.get('pubkey')
+                if not recipient_hex:
+                    self.logger.warning(f"Cible {target.get('uid', 'N/A')} ignorée (pubkey hex manquante pour Nostr)."); failure+=1; continue
+                
+                self.logger.info(f"--- Envoi Nostr DM {i+1}/{len(campaign_data)} à {target.get('uid')} ({recipient_hex[:15]}...) ---")
 
-                self.logger.info(f"--- Envoi Nostr DM {i+1}/{len(targets)} à {target.get('uid')} ({recipient_npub[:15]}...) ---")
-
-                personalized_message = message_template.replace('[URL_OPEN_COLLECTIVE]', url_oc)
-                for key, value in target.items(): personalized_message = personalized_message.replace(f'[{key}]', str(value))
+                full_message = f"{title}\n\n{message_template}"
+                personalized_message = self._prepare_message(full_message, target)
 
                 try:
-                    command = ['python3', nostr_script, '-p', recipient_npub, '-m', personalized_message, '-s', sender_nsec]
-                    self.logger.debug(f"Exécution Nostr : {' '.join(command)}")
+                    command = ['python3', nostr_script, sender_nsec, recipient_hex, personalized_message]
+                    self.logger.debug(f"Exécution Nostr : python3 {os.path.basename(nostr_script)} <nsec> {recipient_hex} <message>")
                     self.execute_command(command)
                     success += 1
                 except Exception as e:
-                    self.logger.error(f"Échec de l'envoi Nostr à {recipient_npub}: {e}", exc_info=True); failure+=1
+                    self.logger.error(f"Échec de l'envoi Nostr à {recipient_hex}: {e}", exc_info=True); failure+=1
             else:
                 self.logger.warning(f"Cible {target.get('uid', 'N/A')} ignorée (pas de MULTIPASS détecté)."); failure+=1; continue
 
-            if i < len(targets) - 1: time.sleep(self.shared_state['config'].get('send_delay_seconds', 2))
+            if i < len(campaign_data) - 1: time.sleep(self.shared_state['config'].get('send_delay_seconds', 2))
 
         self.finalize_campaign("Nostr", success, failure)
 
@@ -928,6 +962,23 @@ class OperatorAgent(Agent):
         self.logger.info(f"✅ {final_report}")
         self.logger.info("="*50)
         self.shared_state['status']['OperatorAgent'] = final_report 
+
+    def _parse_nostr_secret(self, secret_file_path):
+        """Parses a .secret.nostr file to extract NSEC, NPUB, and HEX keys."""
+        try:
+            with open(secret_file_path, 'r') as f:
+                content = f.read().strip()
+            
+            keys = {}
+            parts = content.split(';')
+            for part in parts:
+                if '=' in part:
+                    key, value = part.split('=', 1)
+                    keys[key.strip()] = value.strip()
+            return keys
+        except Exception as e:
+            self.logger.error(f"Failed to parse Nostr secret file {secret_file_path}: {e}")
+            return {}
 
     def setup_memory_system(self):
         """Configure le système de mémoire pour l'opérateur"""
@@ -1172,20 +1223,22 @@ ANALYSE :"""
             with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
                 f.write(response)
                 temp_file = f.name
+           
+            # Récupérer les informations d'authentification correctement
+            captain_email_file = os.path.expanduser("~/.zen/game/players/.current/.player")
+            with open(captain_email_file, 'r') as f:
+                captain_email = f.read().strip()
             
-            # Envoyer via Jaklis
-            captain_email = os.environ.get('CAPTAINEMAIL')
-            if not captain_email:
-                self.logger.error("CAPTAINEMAIL non défini")
-                return False
-            
+            secret_key_path = os.path.expanduser(f"~/.zen/game/nostr/{captain_email}/.secret.dunikey")
             cesium_node = self.shared_state['config']['cesium_node']
             
             cmd = [
                 'python3', self.shared_state['config']['jaklis_script'],
-                '-k', captain_email,
+                '-k', secret_key_path,
                 '-n', cesium_node,
-                '-p', target_pubkey,
+                'send',
+                '-d', target_pubkey,
+                '-t', "Message AstroBot",
                 '-f', temp_file
             ]
             
