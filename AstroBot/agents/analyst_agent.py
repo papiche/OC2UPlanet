@@ -3,6 +3,8 @@ import json
 import os
 import subprocess
 import random
+import requests
+import time
 from collections import defaultdict, Counter
 
 class AnalystAgent(Agent):
@@ -145,14 +147,12 @@ class AnalystAgent(Agent):
         """
         Analyse les descriptions pour en extraire la langue, le pays et la région
         et sauvegarde ces données dans la base de connaissance.
+        Utilise d'abord un service de géolocalisation pour les coordonnées GPS,
+        puis l'IA en dernier recours pour l'analyse textuelle.
         """
-        self.logger.info("🤖 Agent Analyste : Démarrage de l'analyse Géo-Linguistique (avec persistance)...")
+        self.logger.info("🤖 Agent Analyste : Démarrage de l'analyse Géo-Linguistique optimisée...")
         self.shared_state['status']['AnalystAgent'] = "Analyse Géo-Linguistique en cours..."
 
-        if not self._check_ollama_once():
-            self.shared_state['status']['AnalystAgent'] = "Échec : API Ollama indisponible."
-            return
-            
         knowledge_base = self._load_and_sync_knowledge_base()
         prospects_to_analyze = [pk for pk, data in knowledge_base.items() if 'g1_wot' in data.get('source', '')]
         
@@ -162,6 +162,14 @@ class AnalystAgent(Agent):
         needs_analysis_count = 0
         save_interval = 50
         
+        # Statistiques de traitement
+        gps_geolocated = 0
+        ia_analyzed = 0
+        skipped = 0
+        
+        # Limite pour éviter de surcharger Nominatim (max 10000 requêtes GPS par session)
+        gps_requests_made = 0
+                
         for i, pubkey in enumerate(prospects_to_analyze):
             prospect_data = knowledge_base[pubkey]
             
@@ -170,35 +178,84 @@ class AnalystAgent(Agent):
             
             needs_analysis_count += 1
             profile = prospect_data.get('profile', {})
-            description = (profile.get('_source', {}).get('description') or '').strip()
+            source = profile.get('_source', {})
+            description = (source.get('description') or '').strip()
+            geo_point = source.get('geoPoint', {})
 
-            if not description:
+            # Étape 1 : Vérifier si on a des coordonnées GPS ET si on n'a pas dépassé la limite
+            if (geo_point and 'lat' in geo_point and 'lon' in geo_point):
+                lat = geo_point.get('lat')
+                lon = geo_point.get('lon')
+                
+                if lat is not None and lon is not None and lat != 0 and lon != 0:
+                    gps_requests_made += 1
+                    self.logger.info(f"📍 Géolocalisation GPS {gps_requests_made} : {prospect_data.get('uid', 'N/A')}")
+                    
+                    # Utiliser le service de géolocalisation
+                    geo_data = self._geolocate_from_coordinates(lat, lon)
+                    
+                    if geo_data:
+                        meta = prospect_data.setdefault('metadata', {})
+                        meta['language'] = geo_data.get('language', 'xx')
+                        meta['country'] = geo_data.get('country')
+                        meta['region'] = geo_data.get('region')
+                        meta['city'] = geo_data.get('city')
+                        meta['geolocation_source'] = 'gps_service'
+                        
+                        gps_geolocated += 1
+                        self.logger.debug(f"✅ Géolocalisé via GPS : {geo_data.get('country', 'N/A')} - {geo_data.get('region', 'N/A')}")
+                        
+                        if needs_analysis_count > 0 and needs_analysis_count % save_interval == 0:
+                            self.logger.info(f"--- Sauvegarde intermédiaire ({needs_analysis_count} profils analysés)... ---")
+                            self._save_knowledge_base(knowledge_base)
+                        continue
+                    else:
+                        self.logger.debug(f"⚠️ Échec géolocalisation GPS pour {prospect_data.get('uid', 'N/A')}")
+            
+            # Étape 2 : Si pas de GPS, ou géolocalisation échouée, essayer l'analyse textuelle
+            if description:
+                self.logger.info(f"🧠 Analyse IA {needs_analysis_count}/{len(prospects_to_analyze)} : {prospect_data.get('uid', 'N/A')}")
+                prompt = f"{geo_prompt_template}\n\nTexte fourni: \"{description}\""
+                
+                try:
+                    ia_response = self._query_ia(prompt, expect_json=True)
+                    cleaned_answer = self._clean_ia_json_output(ia_response['answer'])
+                    geo_data = json.loads(cleaned_answer)
+                    
+                    meta = prospect_data.setdefault('metadata', {})
+                    meta['language'] = geo_data.get('language', 'xx')
+                    meta['country'] = geo_data.get('country')
+                    meta['region'] = geo_data.get('region')
+                    meta['geolocation_source'] = 'ia_analysis'
+                    
+                    ia_analyzed += 1
+                    
+                    if needs_analysis_count > 0 and needs_analysis_count % save_interval == 0:
+                        self.logger.info(f"--- Sauvegarde intermédiaire ({needs_analysis_count} profils analysés)... ---")
+                        self._save_knowledge_base(knowledge_base)
+                except Exception as e:
+                    self.logger.error(f"Impossible de géo-classifier le profil {prospect_data.get('uid')} : {e}")
+                    meta = prospect_data.setdefault('metadata', {})
+                    meta['language'] = 'xx'
+                    meta['country'] = None
+                    meta['region'] = None
+                    meta['geolocation_source'] = 'failed'
+            else:
+                # Pas de description ni de GPS
                 meta = prospect_data.setdefault('metadata', {})
                 meta['language'] = 'xx'
                 meta['country'] = None
                 meta['region'] = None
-                continue
+                meta['geolocation_source'] = 'no_data'
+                skipped += 1
 
-            self.logger.info(f"Analyse Géo-Linguistique {needs_analysis_count}/{len(prospects_to_analyze)} : {prospect_data.get('uid', 'N/A')}")
-            prompt = f"{geo_prompt_template}\n\nTexte fourni: \"{description}\""
-            
-            try:
-                ia_response = self._query_ia(prompt, expect_json=True)
-                cleaned_answer = self._clean_ia_json_output(ia_response['answer'])
-                geo_data = json.loads(cleaned_answer)
-                
-                meta = prospect_data.setdefault('metadata', {})
-                meta['language'] = geo_data.get('language', 'xx')
-                meta['country'] = geo_data.get('country')
-                meta['region'] = geo_data.get('region')
-
-                if needs_analysis_count > 0 and needs_analysis_count % save_interval == 0:
-                    self.logger.info(f"--- Sauvegarde intermédiaire de la base de connaissance ({needs_analysis_count} profils analysés)... ---")
-                    self._save_knowledge_base(knowledge_base)
-            except Exception as e:
-                self.logger.error(f"Impossible de géo-classifier le profil {prospect_data.get('uid')} : {e}")
-
-        self.logger.info(f"Analyse Géo-Linguistique terminée. {needs_analysis_count} nouveaux profils ont été analysés. Sauvegarde finale.")
+        self.logger.info(f"✅ Analyse Géo-Linguistique terminée.")
+        self.logger.info(f"📊 Statistiques :")
+        self.logger.info(f"   • Géolocalisés via GPS : {gps_geolocated}")
+        self.logger.info(f"   • Analysés via IA : {ia_analyzed}")
+        self.logger.info(f"   • Passés (pas de données) : {skipped}")
+        self.logger.info(f"   • Total traités : {needs_analysis_count}")
+        
         self._save_knowledge_base(knowledge_base)
 
         # Agréger les résultats par PAYS
@@ -220,6 +277,132 @@ class AnalystAgent(Agent):
             })
         
         self._select_and_save_cluster(clusters)
+
+    def _geolocate_from_coordinates(self, lat, lon):
+        """
+        Utilise un service de géolocalisation pour obtenir les informations
+        de pays, région et ville à partir de coordonnées GPS.
+        """
+        try:
+            # Respecter les limites de Nominatim : max 1 requête par seconde
+            # Utiliser un délai aléatoire entre 1.1 et 1.3 secondes (> 1)
+            time.sleep(random.uniform(1.1, 1.3))
+            
+            # Utiliser l'API Nominatim (OpenStreetMap) - gratuite et fiable
+            import requests
+            
+            url = f"https://nominatim.openstreetmap.org/reverse"
+            params = {
+                'lat': lat,
+                'lon': lon,
+                'format': 'json',
+                'accept-language': 'fr,en',
+                'addressdetails': 1
+            }
+            
+            # Ajouter un User-Agent pour respecter les conditions d'utilisation
+            headers = {
+                'User-Agent': 'UPlanet ORIGIN ẐEN - AstroBot/1.0 (https://qo-op.com)'
+            }
+            
+            response = requests.get(url, params=params, headers=headers, timeout=10)
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            if 'error' in data:
+                self.logger.warning(f"⚠️ Erreur de géolocalisation : {data['error']}")
+                return None
+            
+            # Extraire les informations
+            address = data.get('address', {})
+            
+            # Déterminer le pays
+            country = address.get('country') or address.get('country_code', '').upper()
+            
+            # Déterminer la région/état
+            region = (
+                address.get('state') or 
+                address.get('region') or 
+                address.get('province') or 
+                address.get('county')
+            )
+            
+            # Déterminer la ville
+            city = (
+                address.get('city') or 
+                address.get('town') or 
+                address.get('village') or 
+                address.get('municipality')
+            )
+            
+            # Déterminer la langue basée sur le pays
+            language = self._get_language_from_country(country)
+            
+            geo_data = {
+                'language': language,
+                'country': country,
+                'region': region,
+                'city': city
+            }
+            
+            self.logger.debug(f"📍 Géolocalisation réussie : {country} - {region} - {city}")
+            return geo_data
+            
+        except requests.exceptions.RequestException as e:
+            self.logger.warning(f"⚠️ Erreur de requête géolocalisation : {e}")
+            return None
+        except Exception as e:
+            self.logger.warning(f"⚠️ Erreur de géolocalisation : {e}")
+            return None
+
+    def _get_language_from_country(self, country):
+        """
+        Détermine la langue principale basée sur le pays.
+        """
+        if not country:
+            return 'xx'
+        
+        # Mapping pays -> langue principale
+        country_language_map = {
+            'FRANCE': 'fr',
+            'FR': 'fr',
+            'BELGIUM': 'fr',
+            'BE': 'fr',
+            'SWITZERLAND': 'fr',
+            'CH': 'fr',
+            'CANADA': 'fr',
+            'CA': 'fr',
+            'UNITED STATES': 'en',
+            'US': 'en',
+            'USA': 'en',
+            'UNITED KINGDOM': 'en',
+            'GB': 'en',
+            'UK': 'en',
+            'SPAIN': 'es',
+            'ES': 'es',
+            'MEXICO': 'es',
+            'MX': 'es',
+            'ARGENTINA': 'es',
+            'AR': 'es',
+            'GERMANY': 'de',
+            'DE': 'de',
+            'AUSTRIA': 'de',
+            'AT': 'de',
+            'SWITZERLAND': 'de',  # Suisse germanophone
+            'ITALY': 'it',
+            'IT': 'it',
+            'PORTUGAL': 'pt',
+            'PT': 'pt',
+            'BRAZIL': 'pt',
+            'BR': 'pt',
+            'NETHERLANDS': 'nl',
+            'NL': 'nl',
+            'CATALONIA': 'ca',
+            'CATALUNYA': 'ca'
+        }
+        
+        return country_language_map.get(country.upper(), 'xx')
 
     def select_cluster_from_tags(self):
         """
