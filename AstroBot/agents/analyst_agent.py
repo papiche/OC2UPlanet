@@ -189,7 +189,7 @@ class AnalystAgent(Agent):
                 
                 if lat is not None and lon is not None and lat != 0 and lon != 0:
                     gps_requests_made += 1
-                    self.logger.info(f"📍 Géolocalisation GPS {gps_requests_made} : {prospect_data.get('uid', 'N/A')}")
+                    self.logger.info(f"📍 Géolocalisation GPS {gps_requests_made} : {needs_analysis_count}/{len(prospects_to_analyze)} : {prospect_data.get('uid', 'N/A')}")
                     
                     # Utiliser le service de géolocalisation
                     geo_data = self._geolocate_from_coordinates(lat, lon)
