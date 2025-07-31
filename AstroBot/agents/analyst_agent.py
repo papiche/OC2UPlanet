@@ -7,6 +7,7 @@ import requests
 import time
 from collections import defaultdict, Counter
 import unicodedata
+from itertools import combinations
 
 class AnalystAgent(Agent):
     """
@@ -795,10 +796,11 @@ class AnalystAgent(Agent):
 
     def create_automatic_personas(self):
         """
-        Crée automatiquement des personas basés sur les thèmes les plus fréquents
-        détectés dans la base de connaissance et remplit les banques 5-9.
+        Crée automatiquement des personas basés sur des archétypes de thèmes.
+        NOUVELLE LOGIQUE: Crée des trios de thèmes en combinant aléatoirement
+        2 thèmes du Top 50 et 1 thème de l'ensemble pour générer des personas créatifs.
         """
-        self.logger.info("🎭 Agent Analyste : Création automatique de personas basés sur les thèmes...")
+        self.logger.info("🎭 Agent Analyste : Création automatique de personas par combinaison de thèmes...")
         
         # Vérifier Ollama
         if not self._check_ollama_once():
@@ -811,264 +813,208 @@ class AnalystAgent(Agent):
             self.logger.error("❌ Base de connaissance vide. Impossible de créer les personas.")
             return
         
-        # Analyser les thèmes existants
-        all_tags = []
-        analyzed_profiles = 0
+        # Analyser les thèmes existants pour construire nos listes
+        all_tags_flat_list = []
         for pubkey, data in knowledge_base.items():
             metadata = data.get('metadata', {})
             tags = metadata.get('tags', [])
             if tags and tags != ['error']:
-                all_tags.extend(tags)
-                analyzed_profiles += 1
+                all_tags_flat_list.extend(tags)
         
-        total_profiles = len(knowledge_base)
-        self.logger.info(f"📊 Profils analysés : {analyzed_profiles} / {total_profiles}")
-        
-        # Vérifier si l'analyse est suffisante
-        if not all_tags:
-            self.logger.error("❌ Aucun thème détecté dans la base de connaissance. Lancez d'abord l'analyse thématique.")
+        if not all_tags_flat_list:
+            self.logger.error("❌ Aucun thème détecté dans la base de connaissance.")
             return
+
+        tag_counts = Counter(all_tags_flat_list)
         
-        # Si moins de 10% des profils sont analysés, proposer de lancer l'analyse
-        if analyzed_profiles < total_profiles * 0.1:
-            self.logger.warning(f"⚠️ Seulement {analyzed_profiles} profils analysés sur {total_profiles} ({analyzed_profiles/total_profiles*100:.1f}%)")
-            self.logger.warning("⚠️ L'analyse thématique semble incomplète. Les personas générés pourraient ne pas être représentatifs.")
-            
-            choice = input("Voulez-vous lancer l'analyse thématique complète maintenant ? (o/n) : ").strip().lower()
-            if choice in ['o', 'oui', 'y', 'yes']:
-                self.logger.info("🔄 Lancement de l'analyse thématique complète...")
-                self.run_thematic_analysis()
-                
-                # Recharger les données après analyse
-                knowledge_base = self._load_and_sync_knowledge_base()
-                all_tags = []
-                analyzed_profiles = 0
-                for pubkey, data in knowledge_base.items():
-                    metadata = data.get('metadata', {})
-                    tags = metadata.get('tags', [])
-                    if tags and tags != ['error']:
-                        all_tags.extend(tags)
-                        analyzed_profiles += 1
-                
-                self.logger.info(f"📊 Profils analysés après analyse complète : {analyzed_profiles} / {total_profiles}")
-            else:
-                self.logger.info("ℹ️ Continuation avec les données existantes...")
-        
-        # Compter les occurrences et prendre le top 5
-        tag_counts = Counter(all_tags)
-        top_5_themes = tag_counts.most_common(5)
-        
-        self.logger.info(f"📊 Top 5 des thèmes détectés :")
-        for i, (theme, count) in enumerate(top_5_themes, 1):
-            self.logger.info(f"  {i}. {theme} ({count} occurrences)")
+        # Obtenir la liste de tous les thèmes uniques et le top 50
+        all_unique_tags = list(tag_counts.keys())
+        top_50_tags = [tag for tag, count in tag_counts.most_common(50)]
+
+        if len(top_50_tags) < 2:
+            self.logger.error("❌ Pas assez de thèmes dans le Top 50 pour créer des duos. Veuillez analyser plus de profils.")
+            return
+
+        # --- NOUVELLE LOGIQUE : Création de 5 trios aléatoires ---
+        self.logger.info("🎲 Création de 5 archétypes de thèmes par combinaison aléatoire...")
+        generated_groups = []
+        used_combos = set()
+
+        for i in range(5): # On veut créer 5 personas
+            attempts = 0
+            while attempts < 100: # Sécurité pour éviter une boucle infinie
+                # 1. Tirer 2 thèmes distincts du Top 50
+                duo = random.sample(top_50_tags, 2)
+                # 2. Tirer 1 thème de l'ensemble des thèmes uniques
+                third_tag = random.choice(all_unique_tags)
+
+                # 3. S'assurer que le 3ème thème n'est pas déjà dans le duo
+                if third_tag not in duo:
+                    trio = tuple(sorted(duo + [third_tag]))
+                    if trio not in used_combos:
+                        generated_groups.append({'themes': list(trio), 'count': 0})
+                        used_combos.add(trio)
+                        break
+                attempts += 1
+            if attempts == 100:
+                self.logger.warning(f"⚠️ Impossible de générer un trio unique après 100 tentatives pour le groupe {i+1}.")
+
+        if not generated_groups:
+            self.logger.error("❌ Impossible de générer des archétypes de thèmes.")
+            return
+
+        self.logger.info("🏆 5 Archétypes de thèmes générés aléatoirement :")
+        for i, group in enumerate(generated_groups, 1):
+            themes_str = ", ".join(group['themes'])
+            self.logger.info(f"  {i}. [{themes_str}]")
         
         # Charger la configuration des banques existante
         banks_config_file = os.path.join(self.shared_state['config']['workspace'], 'memory_banks_config.json')
         banks_config = self._load_banks_config(banks_config_file)
         
-        # Détecter les langues disponibles
-        languages = self._detect_available_languages()
-        self.logger.info(f"🌍 Langues détectées pour les personas multilingues :")
-        for lang in languages:
-            lang_name = {
-                'fr': 'Français', 'en': 'Anglais', 'es': 'Espagnol',
-                'de': 'Allemand', 'it': 'Italien', 'pt': 'Portugais'
-            }.get(lang, lang.upper())
-            self.logger.info(f"  • {lang} : {lang_name}")
-        
         # Créer les personas pour les banques 5-9
-        for i, (theme, count) in enumerate(top_5_themes):
-            bank_slot = str(5 + i)  # Banques 5, 6, 7, 8, 9
+        successful_creations = 0
+        for i, group in enumerate(generated_groups):
+            bank_slot = str(5 + i)
+            theme_group = group['themes']
             
-            self.logger.info(f"🎭 Création du persona multilingue pour le thème '{theme}' (banque {bank_slot})...")
+            self.logger.info(f"🎭 Création du persona multilingue pour l'archétype '{', '.join(theme_group)}' (banque {bank_slot})...")
             
             # Générer le persona avec l'IA
-            persona = self._generate_persona_for_theme(theme, count, all_tags)
+            persona = self._generate_persona_for_theme_group(theme_group, 0, all_unique_tags)
             
             if persona:
-                # Remplir la banque avec le contenu multilingue
                 banks_config['banks'][bank_slot] = {
                     'name': persona['name'],
                     'archetype': persona['archetype'],
                     'description': persona['description'],
-                    'themes': [theme],
+                    'themes': theme_group,
                     'corpus': persona['corpus'],
                     'multilingual': persona.get('multilingual', {})
                 }
-                
-                # Afficher les langues supportées
-                supported_langs = list(persona.get('multilingual', {}).keys())
-                lang_names = []
-                for lang in supported_langs:
-                    lang_name = {
-                        'fr': 'Français', 'en': 'Anglais', 'es': 'Espagnol',
-                        'de': 'Allemand', 'it': 'Italien', 'pt': 'Portugais'
-                    }.get(lang, lang.upper())
-                    lang_names.append(lang_name)
-                
                 self.logger.info(f"✅ Persona multilingue créé : {persona['name']} ({persona['archetype']})")
-                self.logger.info(f"🌍 Langues supportées : {', '.join(supported_langs)}")
+                successful_creations += 1
             else:
-                self.logger.warning(f"⚠️ Échec de création du persona pour le thème '{theme}'")
+                self.logger.warning(f"⚠️ Échec de création du persona pour l'archétype '{', '.join(theme_group)}'")
         
         # Sauvegarder la configuration mise à jour
         self._save_banks_config(banks_config, banks_config_file)
         
-        self.logger.info(f"🎉 Création automatique terminée ! {len(top_5_themes)} personas créés dans les banques 5-9.")
+        self.logger.info(f"🎉 Création automatique terminée ! {successful_creations} personas créés sur {len(generated_groups)} tentatives.")
         
-        # Afficher un résumé
+        # Afficher un résumé exact des personas réellement créés
         self.logger.info(f"\n📋 RÉSUMÉ DES PERSONAS CRÉÉS :")
-        for i, (theme, count) in enumerate(top_5_themes):
-            bank_slot = str(5 + i)
-            bank = banks_config['banks'].get(bank_slot, {})
+        for i in range(5, 10):
+            bank_slot = str(i)
+            bank = banks_config['banks'].get(bank_slot)
             if bank:
-                self.logger.info(f"  Banque {bank_slot} : {bank['name']} ({bank['archetype']}) - Thème : {theme}")
+                themes_str = ", ".join(bank.get('themes', []))
+                self.logger.info(f"  Banque {bank_slot} : {bank.get('name')} ({bank.get('archetype')}) - Thèmes : {themes_str}")
 
-    def _generate_persona_for_theme(self, theme, theme_count, all_tags):
+    def _generate_persona_for_theme_group(self, theme_group: list, count: int, all_tags: list):
         """
-        Génère un persona complet pour un thème donné en utilisant l'IA.
-        Inclut maintenant la génération multilingue.
+        Génère un persona complet pour un groupe de thèmes donné en utilisant l'IA.
+        Inclut une nouvelle tentative en cas d'erreur de parsing ou de validation.
         """
-        # Construire le contexte avec les thèmes associés
-        related_themes = [t for t in all_tags if t != theme and t in all_tags]
-        related_themes_sample = related_themes[:10]  # Limiter pour éviter un prompt trop long
-        
-        # Détecter les langues disponibles dans la base
+        # Contexte : autres thèmes fréquemment associés aux thèmes du groupe
+        related_themes = []
+        for tag in all_tags:
+            if tag not in theme_group and tag not in related_themes:
+                 related_themes.append(tag)
+        related_themes_sample = related_themes[:10]
+
         languages = self._detect_available_languages()
         
         prompt = f"""Tu es un expert en création de personas marketing multilingues. Tu dois créer un persona complet pour une campagne de communication UPlanet.
 
-THÈME PRINCIPAL : {theme}
-OCCURRENCES DÉTECTÉES : {theme_count}
-THÈMES ASSOCIÉS : {', '.join(related_themes_sample)}
+ARCHÉTYPE DE THÈMES PRINCIPAL : {', '.join(theme_group)}
+THÈMES SOUVENT ASSOCIÉS : {', '.join(related_themes_sample)}
 LANGUES DISPONIBLES : {', '.join(languages)}
 
 TÂCHE : Créer un persona marketing complet avec :
 1. Un nom accrocheur
-2. Un archétype psychologique
-3. Une description du profil type
+2. Un archétype psychologique (ex: "L'Artisan Holistique", "L'Explorateur Spirituel")
+3. Une description du profil type qui incarne la combinaison des thèmes principaux.
 4. Un corpus de communication (vocabulaire, arguments, ton, exemples)
-5. Une version multilingue du contenu pour chaque langue
+5. Une version multilingue du contenu pour chaque langue disponible.
 
-IMPORTANT : Tu dois créer le contenu dans TOUTES les langues disponibles ({', '.join(languages)}).
-Pour chaque langue, adapte le contenu culturellement tout en gardant la même personnalité.
+IMPORTANT : Tu dois créer le contenu dans TOUTES les langues disponibles ({', '.join(languages)}). Adapte le contenu culturellement tout en gardant la même personnalité.
 
 Format de réponse JSON :
 {{
   "name": "Nom du persona",
-    "archetype": "Archétype psychologique",
+  "archetype": "Archétype psychologique",
   "description": "Description du profil type",
-  "themes": ["{theme}"],
-    "corpus": {{
+  "themes": {json.dumps(theme_group)},
+  "corpus": {{
     "tone": "ton de communication",
     "vocabulary": ["mot1", "mot2", "mot3"],
     "arguments": ["argument1", "argument2", "argument3"],
     "examples": ["exemple1", "exemple2", "exemple3"]
   }},
   "multilingual": {{
-    "fr": {{
-      "name": "Nom en français",
-      "archetype": "Archétype en français",
-      "tone": "ton en français",
-      "vocabulary": ["mot1", "mot2", "mot3"],
-      "arguments": ["argument1", "argument2", "argument3"],
-      "examples": ["exemple1", "exemple2", "exemple3"]
-    }},
-    "en": {{
-      "name": "Name in English",
-      "archetype": "Archetype in English",
-      "tone": "tone in English",
-      "vocabulary": ["word1", "word2", "word3"],
-      "arguments": ["argument1", "argument2", "argument3"],
-      "examples": ["example1", "example2", "example3"]
-    }},
-    "es": {{
-      "name": "Nombre en español",
-      "archetype": "Arquetipo en español",
-      "tone": "tono en español",
-      "vocabulary": ["palabra1", "palabra2", "palabra3"],
-      "arguments": ["argumento1", "argumento2", "argumento3"],
-      "examples": ["ejemplo1", "ejemplo2", "ejemplo3"]
-    }},
-    "de": {{
-      "name": "Name auf Deutsch",
-      "archetype": "Archetyp auf Deutsch",
-      "tone": "Ton auf Deutsch",
-      "vocabulary": ["Wort1", "Wort2", "Wort3"],
-      "arguments": ["Argument1", "Argument2", "Argument3"],
-      "examples": ["Beispiel1", "Beispiel2", "Beispiel3"]
-    }},
-    "it": {{
-      "name": "Nome in italiano",
-      "archetype": "Archetipo in italiano",
-      "tone": "tono in italiano",
-      "vocabulary": ["parola1", "parola2", "parola3"],
-      "arguments": ["argomento1", "argomento2", "argomento3"],
-      "examples": ["esempio1", "esempio2", "esempio3"]
-    }},
-    "pt": {{
-      "name": "Nome em português",
-      "archetype": "Arquetipo em português",
-      "tone": "tom em português",
-      "vocabulary": ["palavra1", "palavra2", "palavra3"],
-      "arguments": ["argumento1", "argumento2", "argumento3"],
-      "examples": ["exemplo1", "exemplo2", "exemplo3"]
-    }}
+    "fr": {{ ... contenu en français ... }},
+    "en": {{ ... contenu en anglais ... }},
+    ...
   }}
 }}
 
-Le persona doit être adapté au thème "{theme}" et aux personnes intéressées par ce domaine."""
+Le persona doit être une synthèse créative des thèmes {', '.join(theme_group)}."""
 
-        try:
-            response = self._query_ia(prompt, expect_json=True)
-            if not response:
-                return None
-            
-            # La réponse de l'IA est structurée comme {"answer": "```json\n{...}\n```"}
-            if isinstance(response, dict) and 'answer' in response:
-                # Extraire le contenu JSON de la clé 'answer'
-                answer_content = response['answer']
-                # Nettoyer le contenu (enlever les backticks et 'json')
-                cleaned_response = self._clean_ia_json_output(answer_content)
-                persona_data = json.loads(cleaned_response)
-            elif isinstance(response, dict):
-                # Si c'est déjà un dictionnaire sans clé 'answer', l'utiliser directement
-                persona_data = response
-            else:
-                # Sinon, nettoyer et parser la réponse JSON
-                cleaned_response = self._clean_ia_json_output(response)
-                persona_data = json.loads(cleaned_response)
-            
-            # Valider la structure
-            required_fields = ['name', 'archetype', 'description', 'corpus']
-            for field in required_fields:
-                if field not in persona_data:
-                    self.logger.warning(f"⚠️ Champ manquant dans le persona : {field}")
-                    return None
+        for attempt in range(2): # 1ère tentative + 1 nouvelle tentative
+            try:
+                response = self._query_ia(prompt, expect_json=True)
+                if not response:
+                    if attempt == 0:
+                        self.logger.warning("La requête IA n'a retourné aucune réponse. Nouvelle tentative...")
+                        time.sleep(1)
+                        continue
+                    else:
+                        self.logger.error("La requête IA a de nouveau échoué. Abandon.")
+                        return None
+
+                if isinstance(response, dict) and 'answer' in response:
+                    cleaned_response = self._clean_ia_json_output(response['answer'])
+                    persona_data = json.loads(cleaned_response)
+                elif isinstance(response, dict):
+                    persona_data = response
+                else:
+                    cleaned_response = self._clean_ia_json_output(response)
+                    persona_data = json.loads(cleaned_response)
                 
-            # Vérifier que le contenu multilingue est présent
-            if 'multilingual' not in persona_data:
-                self.logger.warning("⚠️ Contenu multilingue manquant dans le persona")
-                # Créer une structure multilingue basique
-                persona_data['multilingual'] = {}
-                for lang in languages:
-                    persona_data['multilingual'][lang] = {
-                        'name': persona_data['name'],
-                        'archetype': persona_data['archetype'],
-                        'tone': persona_data['corpus']['tone'],
-                        'vocabulary': persona_data['corpus']['vocabulary'],
-                        'arguments': persona_data['corpus']['arguments'],
-                        'examples': persona_data['corpus']['examples']
-                    }
-            
-            return persona_data
-            
-        except json.JSONDecodeError as e:
-            self.logger.error(f"❌ Erreur de parsing JSON pour le persona '{theme}': {e}")
-            return None
-        except Exception as e:
-            self.logger.error(f"❌ Erreur lors de la génération du persona '{theme}': {e}")
-            return None
+                # Valider la structure
+                required_fields = ['name', 'archetype', 'description', 'corpus']
+                if not all(field in persona_data for field in required_fields):
+                    raise ValueError("Champs manquants dans la réponse JSON.")
+                    
+                # Vérifier que le contenu multilingue est présent
+                if 'multilingual' not in persona_data:
+                    self.logger.warning("⚠️ Contenu multilingue manquant dans le persona, il sera créé par défaut.")
+                    persona_data['multilingual'] = {}
+                    for lang in languages:
+                        persona_data['multilingual'][lang] = {
+                            'name': persona_data['name'],
+                            'archetype': persona_data['archetype'],
+                            'tone': persona_data['corpus']['tone'],
+                            'vocabulary': persona_data['corpus']['vocabulary'],
+                            'arguments': persona_data['corpus']['arguments'],
+                            'examples': persona_data['corpus']['examples']
+                        }
+                
+                return persona_data # Succès, on retourne le résultat
+                
+            except (json.JSONDecodeError, ValueError) as e:
+                log_message = f"Erreur de parsing/validation pour le persona '{', '.join(theme_group)}': {e}"
+                if attempt == 0:
+                    self.logger.warning(f"{log_message}. Nouvelle tentative...")
+                    time.sleep(1)
+                else:
+                    self.logger.error(f"Échec final après nouvelle tentative. {log_message}")
+                    return None
+            except Exception as e:
+                self.logger.error(f"❌ Erreur inattendue lors de la génération du persona '{', '.join(theme_group)}': {e}")
+                return None
+        return None
 
     def _detect_available_languages(self):
         """
@@ -1399,62 +1345,28 @@ Le persona doit être adapté au thème "{theme}" et aux personnes intéressées
         # Remplacer tag_counts par les comptes normalisés pour la suite du traitement
         tag_counts = normalized_tag_counts
         
+        # La consolidation sémantique interactive est désactivée pour la nouvelle logique
         # --- NOUVELLE ÉTAPE : Consolidation sémantique interactive ---
-        consolidation_map = self._get_interactive_tag_consolidation(list(tag_counts.keys()))
-
-        if consolidation_map:
-            self.logger.info("🔄 Application des consolidations sémantiques validées...")
-            
-            # Appliquer la consolidation aux comptes de thèmes
-            consolidated_tag_counts = Counter()
-            for tag, count in tag_counts.items():
-                final_tag = consolidation_map.get(tag, tag)
-                consolidated_tag_counts[final_tag] += count
-            tag_counts = consolidated_tag_counts
-
-            # Mettre à jour la carte de mappage pour pointer les thèmes originaux vers leur version finale consolidée
-            for original_tag, normalized_tag in tag_map.items():
-                final_tag = consolidation_map.get(normalized_tag, normalized_tag)
-                tag_map[original_tag] = final_tag
-
-            unique_tags_after_consolidation = len(tag_counts)
-            self.logger.info(f"📊 {unique_tags_after_consolidation} thèmes uniques après consolidation sémantique.")
+        # consolidation_map = self._get_interactive_tag_consolidation(list(tag_counts.keys()))
+        # ... (le reste du bloc a été supprimé)
 
         unique_tags = len(tag_counts)
         
-        # Filtrer les thèmes avec moins de 3 occurrences
-        filtered_tags = {tag: count for tag, count in tag_counts.items() if count >= 3}
-        removed_tags = {tag: count for tag, count in tag_counts.items() if count < 3}
+        # On ne filtre plus les thèmes peu utilisés. On garde tout.
+        filtered_tags = tag_counts 
+        removed_tags = {}
         
-        self.logger.info(f"🎯 {len(filtered_tags)} thèmes conservés (≥ 3 occurrences)")
-        self.logger.info(f"🗑️ {len(removed_tags)} thèmes supprimés (< 3 occurrences)")
+        self.logger.info(f"🎯 {len(filtered_tags)} thèmes conservés après normalisation.")
         
-        if removed_tags:
-            self.logger.info("\n--- Thèmes supprimés (trop peu utilisés) ---")
-            for tag, count in sorted(removed_tags.items(), key=lambda x: x[1], reverse=True):
-                # Trouver les profils qui utilisent ce thème
-                profiles_with_tag = []
-                for pubkey, data in knowledge_base.items():
-                    metadata = data.get('metadata', {})
-                    tags = metadata.get('tags', [])
-                    if tags and tags != ['error']:
-                        # On vérifie la version normalisée
-                        normalized_profile_tags = [self._normalize_tag(t) for t in tags]
-                        if tag in normalized_profile_tags:
-                            profiles_with_tag.append(data.get('uid', pubkey[:10]))
-                
-                self.logger.info(f"  ❌ {tag:<20} ({count:>2} occurrences) - Profils: {', '.join(profiles_with_tag[:3])}")
-                if len(profiles_with_tag) > 3:
-                    self.logger.info(f"      ... et {len(profiles_with_tag) - 3} autres")
-        
-        # Nettoyer et normaliser les tags dans les profils
+        # Le nettoyage des profils se fait maintenant uniquement pour normaliser les tags existants
+        # et non plus pour supprimer les tags rares.
         cleaned_profiles = 0
         for pubkey, data in knowledge_base.items():
             metadata = data.get('metadata', {})
             tags = metadata.get('tags', [])
             if tags and tags != ['error']:
-                # Normaliser chaque tag, filtrer ceux qui ne sont pas conservés, et dédoublonner
-                new_tags_set = {tag_map[tag] for tag in tags if tag_map.get(tag) in filtered_tags}
+                # Normaliser chaque tag et dédoublonner
+                new_tags_set = {tag_map.get(tag, self._normalize_tag(tag)) for tag in tags}
                 new_tags = sorted(list(new_tags_set))
                 
                 # Mettre à jour si la liste a changé
@@ -1469,7 +1381,7 @@ Le persona doit être adapté au thème "{theme}" et aux personnes intéressées
         
         # Afficher le nouveau Top 50
         top_50 = sorted(filtered_tags.items(), key=lambda x: x[1], reverse=True)[:50]
-        self.logger.info(f"\n--- Nouveau Top 50 des thèmes après consolidation ---")
+        self.logger.info(f"\n--- Top 50 des thèmes après normalisation ---")
         for i, (tag, count) in enumerate(top_50, 1):
             self.logger.info(f"  {i:>2}. {tag:<20} ({count:>4} occurrences)")
         
