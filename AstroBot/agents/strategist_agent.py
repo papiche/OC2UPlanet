@@ -11,7 +11,7 @@ class StrategistAgent(Agent):
     Il peut utiliser Perplexica pour enrichir son contexte.
     """
     def _select_bank_for_targets(self, targets, banks_config):
-        """Sélectionne automatiquement la banque de mémoire la plus appropriée pour les cibles"""
+        """Sélectionne automatiquement le persona le plus appropriée pour les cibles"""
         if not targets or not banks_config.get('banks'):
             return None
 
@@ -28,11 +28,11 @@ class StrategistAgent(Agent):
             self.logger.info("Aucun thème détecté dans les cibles, utilisation de la méthode classique")
             return None
 
-        # Calculer le score de correspondance pour chaque banque
+        # Calculer le score de correspondance pour chaque persona
         bank_scores = {}
         for slot, bank in banks_config['banks'].items():
             if not bank.get('corpus'):
-                continue  # Ignorer les banques sans corpus
+                continue  # Ignorer les personas sans corpus
 
             bank_themes = set(bank.get('themes', []))
             if not bank_themes:
@@ -50,10 +50,10 @@ class StrategistAgent(Agent):
                 }
 
         if not bank_scores:
-            self.logger.info("Aucune banque de mémoire ne correspond aux thèmes des cibles")
+            self.logger.info("Aucun persona de mémoire ne correspond aux thèmes des cibles")
             return None
 
-        # Sélectionner la banque avec le meilleur score
+        # Sélectionner le persona avec le meilleur score
         best_slot = max(bank_scores.keys(), key=lambda x: bank_scores[x]['score'])
         best_match = bank_scores[best_slot]
 
@@ -66,19 +66,19 @@ class StrategistAgent(Agent):
         """Permet de choisir le mode de rédaction du message"""
         print("\n🎯 MODE DE RÉDACTION DU MESSAGE")
         print("-" * 40)
-        print("1. Mode Persona : Analyse automatique du profil et sélection de banque")
-        print("2. Mode Auto : Sélection automatique basée sur les thèmes")
-        print("3. Mode Classique : Choix manuel de la banque")
+        print("1. Mode Auto : Analyse automatique du profil et sélection de persona")
+        print("2. Mode Persona : Sélection automatique basée sur les thèmes")
+        print("3. Mode Classique : Choix manuel du persona")
         print()
         
         try:
             choice = input("Choisissez le mode (1-3) : ").strip()
             
             if choice == "1":
-                print("✅ Mode Persona sélectionné")
+                print("✅ Mode Auto sélectionné")
                 return "persona"
             elif choice == "2":
-                print("✅ Mode Auto sélectionné")
+                print("✅ Mode Persona sélectionné")
                 return "auto"
             elif choice == "3":
                 print("✅ Mode Classique sélectionné")
@@ -114,7 +114,7 @@ class StrategistAgent(Agent):
             self.shared_state['status']['StrategistAgent'] = "Échec : Une API requise est indisponible."
             return
 
-        # Charger la configuration des banques de mémoire
+        # Charger la configuration des personas de mémoire
         banks_config_file = os.path.join(self.shared_state['config']['workspace'], 'memory_banks_config.json')
         banks_config = self._load_banks_config(banks_config_file)
 
@@ -128,13 +128,13 @@ class StrategistAgent(Agent):
             self.logger.info(f"🎯 Génération du message personnalisé pour la cible {i+1}/{len(self.shared_state['targets'])} : {target.get('uid', 'Unknown')}")
             
             if mode == "persona":
-                # Mode Persona : Analyse automatique du profil et sélection de banque
+                # Mode Persona : Analyse automatique du profil et sélection de persona
                 selected_bank = self._analyze_profile_and_select_bank([target], banks_config)
                 if selected_bank:
                     self.logger.info(f"🎭 Mode Persona : Banque sélectionnée automatiquement : {selected_bank['name']}")
                     message_content = self._generate_personalized_message_with_persona_mode(selected_bank, treasury_pubkey, target)
                 else:
-                    self.logger.warning("⚠️ Mode Persona : Aucune banque adaptée trouvée, passage en mode classique")
+                    self.logger.warning("⚠️ Mode Persona : Aucun persona adaptée trouvée, passage en mode classique")
                     message_content = self._generate_personalized_message_with_classic_mode(banks_config, treasury_pubkey, target)
             elif mode == "auto":
                 # Mode Auto : Utilisation de la logique existante
@@ -143,11 +143,11 @@ class StrategistAgent(Agent):
                     self.logger.info(f"🎭 Mode Auto : Banque sélectionnée : {selected_bank['name']}")
                     message_content = self._generate_personalized_message_with_bank_mode(selected_bank, target)
                 else:
-                    self.logger.info("📝 Mode Auto : Aucune banque adaptée, passage en mode classique")
+                    self.logger.info("📝 Mode Auto : Aucun persona adaptée, passage en mode classique")
                     message_content = self._generate_personalized_message_with_classic_mode(banks_config, treasury_pubkey, target)
             else:
                 # Mode Classique : Choix manuel
-                self.logger.info("📝 Mode Classique : Choix manuel de la banque")
+                self.logger.info("📝 Mode Classique : Choix manuel du persona")
                 message_content = self._generate_personalized_message_with_classic_mode(banks_config, treasury_pubkey, target)
 
             if message_content:
@@ -209,22 +209,46 @@ class StrategistAgent(Agent):
         self.logger.debug(f"Exécution de la recherche Perplexica : {perplexica_search} \"{query}\"")
         result = subprocess.run([perplexica_search, query], capture_output=True, text=True, check=True)
         self.logger.debug(f"Réponse brute de Perplexica : {result.stdout.strip()}")
+        if result.stderr.strip():
+            self.logger.debug(f"Erreurs Perplexica (stderr) : {result.stderr.strip()}")
         return result.stdout
 
-    def _call_ia_for_writing(self, final_prompt):
+    def _call_ia_for_writing(self, final_prompt, target_language='fr'):
+        """Appelle l'IA pour la rédaction du message dans la langue spécifiée"""
+        # Ajouter l'instruction de langue au prompt
+        language_instruction = f"\n\nIMPORTANT : Écris le message en {target_language.upper()}."
+        if target_language == 'fr':
+            language_instruction = "\n\nIMPORTANT : Écris le message en français."
+        elif target_language == 'en':
+            language_instruction = "\n\nIMPORTANT : Write the message in English."
+        elif target_language == 'es':
+            language_instruction = "\n\nIMPORTANT : Escribe el mensaje en español."
+        elif target_language == 'de':
+            language_instruction = "\n\nIMPORTANT : Schreibe die Nachricht auf Deutsch."
+        elif target_language == 'it':
+            language_instruction = "\n\nIMPORTANT : Scrivi il messaggio in italiano."
+        elif target_language == 'pt':
+            language_instruction = "\n\nIMPORTANT : Escreva a mensagem em português."
+        
+        prompt_with_language = final_prompt + language_instruction
+        
         question_script = self.shared_state['config']['question_script']
-        command = ['python3', question_script, final_prompt]
+        command = ['python3', question_script, prompt_with_language]
         self.logger.info("Génération du message par l'IA...")
-        self.logger.debug(f"Exécution de la commande de rédaction : {' '.join(command[:2])}...")
+        # self.logger.debug(f"Exécution de la commande de rédaction : {' '.join(command[:2])}...")
+        # self.logger.debug(f"Prompt envoyé à l'IA (premiers 3500 caractères) : {prompt_with_language[:3500]}...")
+        self.logger.debug(f"🌍 Langue cible : {target_language}")
         result = subprocess.run(command, capture_output=True, text=True, check=True)
-        self.logger.debug(f"Réponse brute de l'IA (rédaction) : {result.stdout.strip()}")
+        # self.logger.debug(f"Réponse brute de l'IA (rédaction) : {result.stdout.strip()}")
+        if result.stderr.strip():
+            self.logger.debug(f"Erreurs de l'IA (stderr) : {result.stderr.strip()}")
         return result.stdout
 
     def manage_memory_banks(self):
-        """Interface de gestion des banques de mémoire thématiques"""
-        self.logger.info("🏦 Gestionnaire de Banques de Mémoire Thématiques")
+        """Interface de gestion des mémoires persona thématiques"""
+        self.logger.info("🏦 Gestionnaire de Persona Thématiques")
 
-        # Charger la configuration des banques
+        # Charger la configuration des personas
         banks_config_file = os.path.join(self.shared_state['config']['workspace'], 'memory_banks_config.json')
         banks_config = self._load_banks_config(banks_config_file)
 
@@ -233,22 +257,20 @@ class StrategistAgent(Agent):
                 print("\n" + "="*60)
                 print("🏦 GESTIONNAIRE DE BANQUES DE MÉMOIRE")
                 print("="*60)
-                print("Chaque banque représente une 'personnalité' pour l'Agent Stratège")
+                print("Chaque persona représente une 'personnalité' pour l'Agent Stratège")
                 print()
 
-                # Afficher l'état des banques
+                # Afficher l'état des personas
                 self._display_banks_status(banks_config)
 
                 print("\nOptions :")
-                print("1. Créer/Configurer une banque")
-                print("2. Associer des thèmes à une banque")
-                print("3. Remplir le corpus d'une banque")
-                print("4. Tester une banque (générer un message)")
-                print("5. Configurer les liens")
+                print("1. Créer/Configurer un persona")
+                print("2. Associer des thèmes à un persona")
+                print("3. Remplir le corpus d'un persona")
+                print("4. Tester un persona (générer un message)")
+                print("5. Configurer les Liens")
                 print("6. Synchroniser les thèmes depuis l'Agent Analyste")
-                print("7. Sauvegarder et retourner")
-                print("8. Retour sans sauvegarder")
-                print("9. Sauvegarder maintenant (sans quitter)")
+                print("7. Terminé.")
 
                 choice = input("\nVotre choix : ").strip()
 
@@ -266,18 +288,8 @@ class StrategistAgent(Agent):
                     banks_config = self._sync_themes_from_analyst(banks_config)
                 elif choice == "7":
                     self._save_banks_config(banks_config, banks_config_file)
-                    self.logger.info("✅ Configuration des banques sauvegardée")
+                    self.logger.info("✅ Configuration des personas sauvegardée")
                     break
-                elif choice == "8":
-                    print("⚠️ Attention : Les modifications non sauvegardées seront perdues.")
-                    confirm = input("Êtes-vous sûr ? (oui/non) : ").strip().lower()
-                    if confirm in ['oui', 'o', 'yes', 'y']:
-                        break
-                    else:
-                        print("Retour au menu principal...")
-                elif choice == "9":
-                    self._save_banks_config(banks_config, banks_config_file)
-                    self.logger.info("✅ Configuration sauvegardée")
                 else:
                     print("❌ Choix invalide")
 
@@ -296,7 +308,7 @@ class StrategistAgent(Agent):
                 self.logger.error("❌ Impossible de sauvegarder la configuration")
 
     def _load_banks_config(self, config_file):
-        """Charge la configuration des banques de mémoire"""
+        """Charge la configuration Persona"""
         if os.path.exists(config_file):
             try:
                 with open(config_file, 'r', encoding='utf-8') as f:
@@ -410,26 +422,51 @@ class StrategistAgent(Agent):
 
         return []
 
+    def _get_top_themes_with_frequency(self, limit=50):
+        """Récupère le top N des thèmes avec leur fréquence d'occurrence"""
+        try:
+            enriched_file = self.shared_state['config']['enriched_prospects_file']
+            if os.path.exists(enriched_file):
+                with open(enriched_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+
+                # Compter la fréquence de chaque thème
+                theme_counts = {}
+                for pubkey, profile_data in data.items():
+                    metadata = profile_data.get('metadata', {})
+                    tags = metadata.get('tags', [])
+                    if isinstance(tags, list) and tags != ['error']:
+                        for tag in tags:
+                            theme_counts[tag] = theme_counts.get(tag, 0) + 1
+
+                # Trier par fréquence décroissante et prendre le top N
+                sorted_themes = sorted(theme_counts.items(), key=lambda x: x[1], reverse=True)
+                return sorted_themes[:limit]
+        except Exception as e:
+            self.logger.error(f"Erreur lors de la récupération des thèmes : {e}")
+
+        return []
+
     def _display_banks_status(self, banks_config):
-        """Affiche l'état des banques de mémoire"""
-        print("\n📊 ÉTAT DES BANQUES DE MÉMOIRE :")
+        """Affiche l'état des mémoire persona"""
+        print("\n📊 ÉTAT DE LA MÉMOIRE :")
         print("-" * 60)
 
         for slot, bank in banks_config['banks'].items():
             status = "✅" if bank.get('corpus') else "❌"
             themes_count = len(bank.get('themes', []))
-            print(f"{status} Banque #{slot}: {bank['name']}")
+            print(f"{status} Persona #{slot}: {bank['name']}")
             print(f"    Archétype: {bank.get('archetype', 'Non défini')}")
             print(f"    Thèmes associés: {themes_count}")
             print(f"    Corpus: {'Rempli' if bank.get('corpus') else 'Vide'}")
             print()
 
     def _configure_bank(self, banks_config):
-        """Configure une banque de mémoire"""
-        print("\n🔧 CONFIGURATION D'UNE BANQUE")
+        """Configure une mémoire Persona"""
+        print("\n🔧 CONFIGURATION D'UN PERSONA")
         print("-" * 40)
 
-        # Afficher les banques disponibles avec plus de détails
+        # Afficher les personas disponibles avec plus de détails
         for slot in range(12):
             bank = banks_config['banks'].get(str(slot), {})
             name = bank.get('name', 'Non configurée')
@@ -439,16 +476,16 @@ class StrategistAgent(Agent):
             print(f"{slot}. {status} {name} ({archetype})")
 
         try:
-            slot = input("\nChoisissez le numéro de la banque (0-11) : ").strip()
+            slot = input("\nChoisissez le numéro du persona (0-11) : ").strip()
             if not (0 <= int(slot) <= 11):
-                print("❌ Numéro de banque invalide")
+                print("❌ Numéro de persona invalide")
                 return banks_config
 
             slot = str(slot)
             bank = banks_config['banks'].get(slot, {})
 
             print(f"\n{'='*50}")
-            print(f"CONFIGURATION DE LA BANQUE #{slot}")
+            print(f"CONFIGURATION DU PERSONA #{slot}")
             print(f"{'='*50}")
 
             # Afficher la configuration actuelle
@@ -494,47 +531,61 @@ class StrategistAgent(Agent):
         return banks_config
 
     def _associate_themes_to_bank(self, banks_config):
-        """Associe des thèmes à une banque"""
-        print("\n🏷️ ASSOCIATION DE THÈMES À UNE BANQUE")
+        """Associe des thèmes à un Persona"""
+        print("\n🏷️ ASSOCIATION DE THÈMES À UN PERSONA")
         print("-" * 40)
 
-        # Afficher les banques
+        # Afficher les personas avec leurs thèmes
         for slot in range(12):
             bank = banks_config['banks'].get(str(slot), {})
             name = bank.get('name', 'Non configurée')
             themes = bank.get('themes', [])
-            print(f"{slot}. {name} ({len(themes)} thèmes)")
+            if themes:
+                themes_str = ', '.join(themes[:3])  # Afficher les 3 premiers thèmes
+                if len(themes) > 3:
+                    themes_str += f" (+{len(themes)-3} autres)"
+                print(f"{slot}. {name}")
+                print(f"   Thèmes : {themes_str}")
+            else:
+                print(f"{slot}. {name} (aucun thème)")
 
         try:
-            slot = input("\nChoisissez le numéro de la banque (0-11) : ").strip()
+            slot = input("\nChoisissez le numéro du persona (0-11) : ").strip()
             if not (0 <= int(slot) <= 11):
-                print("❌ Numéro de banque invalide")
+                print("❌ Numéro de persona invalide")
                 return banks_config
 
             slot = str(slot)
             bank = banks_config['banks'].get(slot, {})
 
-            print(f"\nThèmes disponibles :")
-            available_themes = banks_config.get('available_themes', [])
-            for i, theme in enumerate(available_themes):
-                print(f"{i+1}. {theme}")
+            print(f"\nThèmes disponibles (Top 50 par fréquence) :")
+            top_themes = self._get_top_themes_with_frequency(50)
+            theme_names = [theme for theme, count in top_themes]
+            
+            for i, (theme, count) in enumerate(top_themes):
+                print(f"{i+1:2d}. {theme} ({count} profils)")
 
-            print(f"\nThèmes actuellement associés à la banque #{slot} :")
+            print(f"\nThèmes actuellement associés au persona #{slot} :")
             current_themes = bank.get('themes', [])
-            for theme in current_themes:
-                print(f"  - {theme}")
+            
+            if current_themes:
+                for theme in current_themes:
+                    print(f"  - {theme}")
+                else:
+                    print("  - Aucun thème associé")
 
             print("\nEntrez les numéros des thèmes à associer (séparés par des virgules) :")
             print("Exemple: 1,3,5 pour associer les thèmes 1, 3 et 5")
+            print("💡 Conseil : Choisissez des thèmes pertinents pour ce persona")
 
             choice = input("Votre choix : ").strip()
             if choice:
                 try:
                     indices = [int(x.strip()) - 1 for x in choice.split(',')]
-                    selected_themes = [available_themes[i] for i in indices if 0 <= i < len(available_themes)]
+                    selected_themes = [theme_names[i] for i in indices if 0 <= i < len(theme_names)]
                     bank['themes'] = selected_themes
                     banks_config['banks'][slot] = bank
-                    print(f"✅ {len(selected_themes)} thèmes associés à la banque #{slot}")
+                    print(f"✅ {len(selected_themes)} thèmes associés au persona #{slot}")
                 except (ValueError, IndexError):
                     print("❌ Format invalide")
 
@@ -544,11 +595,11 @@ class StrategistAgent(Agent):
         return banks_config
 
     def _fill_bank_corpus(self, banks_config):
-        """Remplit le corpus d'une banque de mémoire"""
-        print("\n📚 REMPLISSAGE DU CORPUS D'UNE BANQUE")
+        """Remplit le corpus d'un persona de mémoire"""
+        print("\n📚 REMPLISSAGE DU CORPUS D'UN PERSONA")
         print("-" * 40)
 
-        # Afficher les banques
+        # Afficher les personas
         for slot in range(12):
             bank = banks_config['banks'].get(str(slot), {})
             name = bank.get('name', 'Non configurée')
@@ -557,9 +608,9 @@ class StrategistAgent(Agent):
             print(f"{slot}. {status} {name}")
 
         try:
-            slot = input("\nChoisissez le numéro de la banque (0-11) : ").strip()
+            slot = input("\nChoisissez le numéro du persona (0-11) : ").strip()
             if not (0 <= int(slot) <= 11):
-                print("❌ Numéro de banque invalide")
+                print("❌ Numéro de persona invalide")
                 return banks_config
 
             slot = str(slot)
@@ -661,7 +712,7 @@ class StrategistAgent(Agent):
             banks_config['banks'][slot] = bank
 
             print(f"\n{'='*60}")
-            print(f"✅ CORPUS DE LA BANQUE #{slot} MIS À JOUR")
+            print(f"✅ CORPUS DU PERSONA #{slot} MIS À JOUR")
             print(f"{'='*60}")
             print(f"📝 Nom : {bank['name']}")
             print(f"🎭 Archétype : {bank['archetype']}")
@@ -680,7 +731,7 @@ class StrategistAgent(Agent):
         return banks_config
 
     def _sync_themes_from_analyst(self, banks_config):
-        """Synchronise les thèmes identifiés par l'Agent Analyste avec la configuration des banques"""
+        """Synchronise les thèmes identifiés par l'Agent Analyste avec la configuration des personas"""
         print("\n🔄 SYNCHRONISATION DES THÈMES")
         print("-" * 40)
 
@@ -700,14 +751,14 @@ class StrategistAgent(Agent):
         banks_config['available_themes'] = available_themes
 
         print(f"\n✅ {len(available_themes)} thèmes synchronisés")
-        print("💡 Vous pouvez maintenant associer ces thèmes aux banques")
+        print("💡 Vous pouvez maintenant associer ces thèmes aux personas")
 
         return banks_config
 
     def _show_bank_themes_details(self, bank, slot):
-        """Affiche les détails des thèmes d'une banque"""
+        """Affiche les détails des thèmes d'un persona"""
         print(f"\n{'='*60}")
-        print(f"REMPLISSAGE DU CORPUS - BANQUE #{slot}")
+        print(f"REMPLISSAGE DU CORPUS - PERSONA #{slot}")
         print(f"{'='*60}")
         print(f"📝 Nom : {bank.get('name', 'Non nommée')}")
         print(f"🎭 Archétype : {bank.get('archetype', 'Non défini')}")
@@ -727,20 +778,20 @@ class StrategistAgent(Agent):
         print(f"{'='*60}")
 
     def _test_bank_message(self, banks_config):
-        """Teste la génération d'un message avec une banque spécifique"""
+        """Teste la génération d'un message avec un persona spécifique"""
         print("\n🧪 TEST DE GÉNÉRATION DE MESSAGE")
         print("-" * 40)
 
-        # Afficher les banques disponibles
+        # Afficher les personas disponibles
         for slot in range(12):
             bank = banks_config['banks'].get(str(slot), {})
             if bank.get('name'):
                 print(f"{slot}. {bank['name']}")
 
         try:
-            slot = input("\nChoisissez le numéro de la banque à tester : ").strip()
+            slot = input("\nChoisissez le numéro du persona à tester : ").strip()
             if not (0 <= int(slot) <= 11):
-                print("❌ Numéro de banque invalide")
+                print("❌ Numéro de persona invalide")
                 return
 
             slot = str(slot)
@@ -750,7 +801,7 @@ class StrategistAgent(Agent):
                 print("❌ Banque non configurée")
                 return
 
-            print(f"\nTest de la banque #{slot} : {bank['name']}")
+            print(f"\nTest du persona #{slot} : {bank['name']}")
 
             # Afficher les liens disponibles
             available_links = self._get_available_links(self.shared_state['config'])
@@ -791,14 +842,34 @@ class StrategistAgent(Agent):
         except Exception as e:
             print(f"❌ Erreur lors du test : {e}")
 
-    def _generate_message_with_bank(self, bank, target_description):
-        """Génère un message en utilisant une banque de mémoire spécifique"""
-        corpus = bank.get('corpus', {})
+    def _generate_message_with_bank(self, bank, target_description, target_language='fr'):
+        """Génère un message en utilisant une mémoire persona spécifique dans la langue cible"""
+        # Vérifier si le persona a du contenu multilingue
+        multilingual = bank.get('multilingual', {})
+        
+        if target_language in multilingual:
+            # Utiliser le contenu multilingue
+            lang_content = multilingual[target_language]
+            corpus = {
+                'tone': lang_content.get('tone', ''),
+                'vocabulary': lang_content.get('vocabulary', []),
+                'arguments': lang_content.get('arguments', []),
+                'examples': lang_content.get('examples', [])
+            }
+            bank_name = lang_content.get('name', bank.get('name', ''))
+            bank_archetype = lang_content.get('archetype', bank.get('archetype', ''))
+            self.logger.debug(f"🌍 Utilisation du contenu multilingue pour {target_language}")
+        else:
+            # Fallback vers le contenu français
+            corpus = bank.get('corpus', {})
+            bank_name = bank.get('name', '')
+            bank_archetype = bank.get('archetype', '')
+            self.logger.debug(f"🌍 Utilisation du contenu français (fallback)")
 
-        prompt = f"""Tu es l'Agent Stratège d'UPlanet. Tu dois rédiger un message de campagne en adoptant la personnalité de la banque de mémoire suivante :
+        prompt = f"""Tu es l'Agent Stratège d'UPlanet. Tu dois rédiger un message de campagne personnalisé en adoptant la personnalité du persona de mémoire suivante :
 
-ARCHÉTYPE : {bank.get('archetype', 'Non défini')}
-NOM DE LA BANQUE : {bank.get('name', 'Non nommée')}
+ARCHÉTYPE : {bank_archetype}
+NOM DU PERSONA : {bank_name}
 THÈMES ASSOCIÉS : {', '.join(bank.get('themes', []))}
 
 TON DE COMMUNICATION : {corpus.get('tone', 'Non défini')}
@@ -811,10 +882,12 @@ ARGUMENTS PRINCIPAUX :
 EXEMPLES DE PHRASES :
 {chr(10).join([f"- {example}" for example in corpus.get('examples', [])])}
 
-TÂCHE : Rédige un message de campagne pour présenter UPlanet et le MULTIPASS à des personnes intéressées par : {target_description}
+{target_description}
+
+TÂCHE : Rédige un message de campagne personnalisé pour présenter UPlanet et le MULTIPASS à ce prospect spécifique.
 
 Le message doit :
-1. Utiliser le vocabulaire et le ton de cette banque
+1. Utiliser le vocabulaire et le ton de cette persona
 2. Intégrer les arguments principaux
 3. S'inspirer des exemples fournis
 4. Être personnalisé et engageant
@@ -848,12 +921,17 @@ Exemple INCORRECT : "Rejoignez-nous sur https://discord.gg/uplanet"
 Format : Message de 150-200 mots maximum."""
 
         try:
-            result = subprocess.run(
-                ['python3', self.shared_state['config']['question_script'], prompt, '--json'],
-                capture_output=True, text=True, check=True
-            )
-            response = json.loads(result.stdout)
-            message_content = response.get('answer', 'Erreur lors de la génération')
+            message_content = self._call_ia_for_writing(prompt, target_language)
+            if not message_content:
+                return "Erreur lors de la génération du message"
+            
+            # Essayer de parser comme JSON si possible
+            try:
+                response = json.loads(message_content)
+                message_content = response.get('answer', message_content)
+            except json.JSONDecodeError:
+                # Si ce n'est pas du JSON, utiliser directement
+                pass
 
             # Vérifier si l'agent a utilisé des URLs directes
             direct_urls = re.findall(r'https?://[^\s]+', message_content)
@@ -864,11 +942,11 @@ Format : Message de 150-200 mots maximum."""
 
             return self._inject_links(message_content, self.shared_state['config'])
         except Exception as e:
-            self.logger.error(f"Erreur lors de la génération avec banque : {e}")
+            self.logger.error(f"Erreur lors de la génération avec persona : {e}")
             return f"Erreur lors de la génération : {e}"
 
     def _save_banks_config(self, banks_config, config_file):
-        """Sauvegarde la configuration des banques"""
+        """Sauvegarde la configuration des personas"""
         try:
             os.makedirs(os.path.dirname(config_file), exist_ok=True)
             with open(config_file, 'w', encoding='utf-8') as f:
@@ -915,6 +993,41 @@ Format : Message de 150-200 mots maximum."""
         message = re.sub(r'\n\s*\n\s*\n', '\n\n', message)
 
         return message.strip()
+
+    def _get_target_language(self, target):
+        """
+        Récupère la langue du profil depuis la base de connaissance.
+        Retourne 'fr' par défaut si pas d'information disponible.
+        """
+        try:
+            # Charger la base de connaissance
+            kb_file = self.shared_state['config']['enriched_prospects_file']
+            if not os.path.exists(kb_file):
+                return 'fr'  # Défaut français
+            
+            with open(kb_file, 'r') as f:
+                knowledge_base = json.load(f)
+            
+            # Chercher le profil par pubkey
+            pubkey = target.get('pubkey')
+            if not pubkey or pubkey not in knowledge_base:
+                return 'fr'  # Défaut français
+            
+            profile_data = knowledge_base[pubkey]
+            metadata = profile_data.get('metadata', {})
+            language = metadata.get('language')
+            
+            # Retourner la langue si valide, sinon français par défaut
+            if language and language != 'xx':
+                self.logger.debug(f"🌍 Langue détectée pour {target.get('uid', 'N/A')} : {language}")
+                return language
+            else:
+                self.logger.debug(f"🌍 Langue par défaut pour {target.get('uid', 'N/A')} : fr")
+                return 'fr'
+                
+        except Exception as e:
+            self.logger.warning(f"⚠️ Erreur lors de la récupération de la langue : {e}")
+            return 'fr'  # Défaut français
 
     def _get_available_links(self, config):
         """Retourne la liste des liens disponibles pour l'aide"""
@@ -1079,14 +1192,14 @@ Format : Message de 150-200 mots maximum."""
         return message
 
     def _choose_bank_for_classic_method(self, banks_config):
-        """Permet de choisir une banque de contexte pour la méthode classique"""
-        print("\n🎭 CHOIX DE LA BANQUE DE CONTEXTE")
+        """Permet de choisir un persona de contexte pour la méthode classique"""
+        print("\n🎭 CHOIX DU PERSONA DE CONTEXTE")
         print("-" * 40)
-        print("Vous pouvez choisir une banque de mémoire pour enrichir le contexte")
-        print("ou continuer sans banque (méthode classique pure)")
+        print("Vous pouvez choisir un persona de mémoire pour enrichir le contexte")
+        print("ou continuer sans persona (méthode classique pure)")
         print()
         
-        # Afficher les banques disponibles
+        # Afficher les personas disponibles
         available_banks = []
         for slot in range(12):
             bank = banks_config['banks'].get(str(slot), {})
@@ -1095,13 +1208,13 @@ Format : Message de 150-200 mots maximum."""
                 print(f"{slot}. {bank['name']} ({bank.get('archetype', 'Non défini')})")
         
         if not available_banks:
-            print("❌ Aucune banque configurée avec corpus")
+            print("❌ Aucun persona configurée avec corpus")
             return None
         
-        print(f"{len(available_banks)}. Aucune banque (méthode classique pure)")
+        print(f"{len(available_banks)}. Aucun persona (méthode classique pure)")
         
         try:
-            choice = input(f"\nChoisissez une banque (0-{len(available_banks)-1}) ou {len(available_banks)} pour aucune : ").strip()
+            choice = input(f"\nChoisissez un persona (0-{len(available_banks)-1}) ou {len(available_banks)} pour aucune : ").strip()
             choice_int = int(choice)
             
             if choice_int == len(available_banks):
@@ -1120,7 +1233,7 @@ Format : Message de 150-200 mots maximum."""
             return None
 
     def _analyze_profile_and_select_bank(self, targets, banks_config):
-        """Analyse le profil du prospect et sélectionne automatiquement la banque la plus adaptée"""
+        """Analyse le profil du prospect et sélectionne automatiquement le persona la plus adaptée"""
         self.logger.info("🔍 Mode Persona : Analyse du profil du prospect...")
         
         if not targets:
@@ -1128,49 +1241,120 @@ Format : Message de 150-200 mots maximum."""
             
         target = targets[0]  # Prendre la première cible pour l'analyse
         
-        # Construire le profil complet
+        # Construire le profil complet en enrichissant avec la base de connaissance
         profile_data = {
             'uid': target.get('uid', ''),
-            'website': target.get('website', ''),
-            'tags': target.get('tags', []),
-            'description': target.get('description', ''),
+            'website': '',
+            'tags': [],
+            'description': '',
             'analyst_report': self.shared_state.get('analyst_report', ''),
             'web_context': ''
         }
         
-        # Enrichir avec le contexte web si disponible
-        if target.get('website'):
-            self.logger.info(f"🕵️  Recherche Perplexica pour enrichir le profil : {target['website']}")
-            search_query = f"Analyse le profil de {target.get('uid', '')} et son site {target['website']}. Identifie ses centres d'intérêt, son domaine d'activité, ses valeurs et son style de communication."
-            try:
-                profile_data['web_context'] = self._call_perplexica(search_query)
-                self.logger.info("✅ Contexte web obtenu pour l'analyse de profil")
-            except Exception as e:
-                self.logger.warning(f"⚠️ Impossible d'obtenir le contexte web : {e}")
+        # Enrichir avec les données de la base de connaissance
+        try:
+            kb_file = self.shared_state['config']['enriched_prospects_file']
+            if os.path.exists(kb_file):
+                with open(kb_file, 'r') as f:
+                    knowledge_base = json.load(f)
+                
+                # Chercher par pubkey d'abord, puis par uid
+                profile_info = None
+                search_key = None
+                
+                # Essayer par pubkey
+                pubkey = target.get('pubkey')
+                if pubkey and pubkey in knowledge_base:
+                    profile_info = knowledge_base[pubkey]
+                    search_key = pubkey
+                    self.logger.debug(f"🔍 Profil trouvé par pubkey : {pubkey}")
+                
+                # Si pas trouvé par pubkey, essayer par uid
+                if not profile_info:
+                    uid = target.get('uid')
+                    if uid:
+                        for key, info in knowledge_base.items():
+                            if info.get('uid') == uid:
+                                profile_info = info
+                                search_key = key
+                                self.logger.debug(f"🔍 Profil trouvé par uid : {uid} (pubkey: {key})")
+                                break
+                
+                if profile_info:
+                    # Extraire les tags depuis les métadonnées
+                    metadata = profile_info.get('metadata', {})
+                    profile_data['tags'] = metadata.get('tags', [])
+                    
+                    # Extraire la description depuis le profil
+                    profile = profile_info.get('profile', {})
+                    if profile and '_source' in profile:
+                        source = profile['_source']
+                        profile_data['description'] = source.get('description', '')
+                        
+                        # Extraire le site web depuis les réseaux sociaux
+                        socials = source.get('socials', [])
+                        for social in socials:
+                            if isinstance(social, dict) and social.get('type') == 'web':
+                                profile_data['website'] = social.get('url', '')
+                                break
+                            elif isinstance(social, str) and 'http' in social:
+                                profile_data['website'] = social
+                                break
+                    
+                    self.logger.debug(f"✅ Profil enrichi pour {profile_data['uid']} : {len(profile_data['tags'])} tags, description: {len(profile_data['description'])} chars")
+                    self.logger.debug(f"🔍 Tags extraits : {profile_data['tags']}")
+                    self.logger.debug(f"🔍 Description extraite : {profile_data['description'][:100]}...")
+                else:
+                    self.logger.warning(f"⚠️ Profil non trouvé dans la base de connaissance pour {target.get('uid', 'Unknown')} (pubkey: {pubkey})")
+            else:
+                self.logger.warning("⚠️ Base de connaissance non trouvée")
+        except Exception as e:
+            self.logger.error(f"❌ Erreur lors de l'enrichissement du profil : {e}")
+        
+        # Enrichir avec le contexte web si disponible (désactivé pour le premier message)
+        if profile_data['website']:
+            self.logger.debug(f"🔍 Site web détecté pour {profile_data['uid']} : {profile_data['website']}")
+            profile_data['web_context'] = ""
+        else:
+            self.logger.debug(f"🔍 Pas de site web pour {profile_data['uid']}")
+            profile_data['web_context'] = ""
         
         # Construire le prompt d'analyse
-        analysis_prompt = f"""Tu es un expert en analyse de profils pour UPlanet. Tu dois analyser le profil d'un prospect et déterminer quelle banque de mémoire (persona) est la plus adaptée pour lui adresser un message personnalisé.
+        analysis_prompt = f"""Tu es un expert en analyse de profils pour UPlanet. Tu dois analyser le profil d'un prospect et déterminer quelle persona de mémoire (persona) est la plus adaptée pour lui adresser un message personnalisé.
 
 PROFIL DU PROSPECT :
 - Identifiant : {profile_data['uid']}
 - Site web : {profile_data['website']}
-- Tags : {', '.join(profile_data['tags'])}
-- Description : {profile_data['description']}
-- Rapport Analyste : {profile_data['analyst_report']}
-- Contexte Web : {profile_data['web_context']}
+- Tags : {', '.join(profile_data['tags']) if profile_data['tags'] else 'Aucun tag'}
+- Description : {profile_data['description'] if profile_data['description'] else 'Aucune description'}
+- Rapport Analyste : {profile_data['analyst_report'] if profile_data['analyst_report'] else 'Aucun rapport'}
+- Contexte Web : {profile_data['web_context'] if profile_data['web_context'] else 'Aucun contexte'}
 
 BANQUES DE MÉMOIRE DISPONIBLES :"""
 
-        # Ajouter les informations sur les banques disponibles
+        # Debug : afficher les données du profil
+        self.logger.debug(f"🔍 Données du profil pour l'analyse :")
+        self.logger.debug(f"  - UID : {profile_data['uid']}")
+        self.logger.debug(f"  - Site web : {profile_data['website']}")
+        self.logger.debug(f"  - Tags : {profile_data['tags']}")
+        self.logger.debug(f"  - Description : {profile_data['description'][:200] if profile_data['description'] else 'Aucune'}...")
+
+        # Ajouter les informations sur les personas disponibles
         available_banks = []
         for slot in range(12):
             bank = banks_config['banks'].get(str(slot), {})
             if bank.get('name') and bank.get('corpus'):
                 available_banks.append((slot, bank))
-                analysis_prompt += f"\n- {bank['name']} (Archetype: {bank.get('archetype', 'Non défini')}, Thèmes: {', '.join(bank.get('themes', []))})"
+                vocab = ', '.join(bank.get('corpus', {}).get('vocabulary', []))  # All vocabulary keywords
+                analysis_prompt += f"\n- Banque {slot}: {bank['name']} (Archetype: {bank.get('archetype', 'Non défini')}, Thèmes: {', '.join(bank.get('themes', []))}, Vocabulaire: {vocab})"
+        
+        self.logger.debug(f"🔍 Banques disponibles pour l'analyse : {len(available_banks)}")
+        for slot, bank in available_banks:
+            vocab = ', '.join(bank.get('corpus', {}).get('vocabulary', []))
+            self.logger.debug(f"  - Banque {slot}: {bank['name']} ({bank.get('archetype', 'Non défini')}) : {vocab}")
         
         if not available_banks:
-            self.logger.warning("⚠️ Aucune banque configurée pour l'analyse de profil")
+            self.logger.warning("⚠️ Aucun persona configurée pour l'analyse de profil")
             return None
         
         analysis_prompt += f"""
@@ -1178,9 +1362,11 @@ BANQUES DE MÉMOIRE DISPONIBLES :"""
 INSTRUCTIONS :
 1. Analyse le profil du prospect en détail
 2. Identifie ses centres d'intérêt, son domaine d'activité, ses valeurs
-3. Détermine quel archetype de banque correspond le mieux à son profil
-4. Réponds UNIQUEMENT avec le numéro de la banque (0-{len(available_banks)-1}) qui correspond le mieux
-5. Si aucune banque ne correspond vraiment, réponds "AUCUNE"
+3. Détermine quel archetype de persona correspond le mieux à son profil
+4. Réponds UNIQUEMENT avec le numéro du persona (0-{len(available_banks)}) qui correspond le mieux
+5. Si aucun persona ne correspond vraiment, réponds "AUCUNE"
+
+IMPORTANT : Assure-toi que ta réponse numérique correspond à ton raisonnement !
 
 ANALYSE :"""
 
@@ -1189,15 +1375,21 @@ ANALYSE :"""
             self.logger.info("🧠 Analyse du profil par l'IA...")
             analysis_result = self._call_ia_for_writing(analysis_prompt)
             
-            # Extraire le numéro de la banque sélectionnée
+            # Debug : afficher la réponse complète
+            # self.logger.debug(f"🔍 Réponse complète de l'IA : {analysis_result}")
+            
+            # Extraire le numéro du persona sélectionnée
             import re
             bank_match = re.search(r'\b(\d+)\b', analysis_result.strip())
             
             if bank_match:
                 bank_index = int(bank_match.group(1))
+                self.logger.debug(f"🔍 Numéro de persona extrait : {bank_index} (/{len(available_banks)})")
+                self.logger.debug(f"🔍 Banques disponibles : {[f'{slot}:{bank['name']}' for slot, bank in available_banks]}")
+                
                 if 0 <= bank_index < len(available_banks):
                     selected_slot, selected_bank = available_banks[bank_index]
-                    self.logger.info(f"✅ Banque sélectionnée automatiquement : {selected_bank['name']}")
+                    self.logger.info(f"✅ Banque sélectionnée automatiquement : {selected_bank['name']} (slot {selected_slot})")
                     
                     # Afficher le raisonnement
                     print(f"\n🎭 ANALYSE DE PROFIL - RÉSULTAT")
@@ -1205,13 +1397,16 @@ ANALYSE :"""
                     print(f"Banque sélectionnée : {selected_bank['name']}")
                     print(f"Archetype : {selected_bank.get('archetype', 'Non défini')}")
                     print(f"Thèmes : {', '.join(selected_bank.get('themes', []))}")
-                    print(f"Raisonnement IA : {analysis_result.strip()}")
+                    print(f"Raisonnement IA : {bank_index}")
+                    print(f"\n{analysis_result.strip()}")
                     
                     return selected_bank
                 else:
-                    self.logger.warning(f"⚠️ Index de banque invalide : {bank_index}")
+                    self.logger.warning(f"⚠️ Index de persona invalide : {bank_index} (max: {len(available_banks)-1})")
+                    self.logger.debug(f"🔍 Banques disponibles : {[f'{slot}:{bank['name']}' for slot, bank in available_banks]}")
             else:
-                self.logger.warning("⚠️ Impossible de déterminer la banque depuis l'analyse IA")
+                self.logger.warning("⚠️ Impossible de déterminer le persona depuis l'analyse IA")
+                self.logger.debug(f"🔍 Réponse qui n'a pas de numéro : {analysis_result}")
                 
         except Exception as e:
             self.logger.error(f"❌ Erreur lors de l'analyse de profil : {e}")
@@ -1223,38 +1418,65 @@ ANALYSE :"""
         self.logger.info(f"🎭 Mode Persona : Génération du message personnalisé pour {target.get('uid', 'Unknown')}")
         
         try:
-            # Construire le contexte enrichi pour la banque
+            # Construire le contexte enrichi pour le persona
             analyst_report = self.shared_state.get('analyst_report', "Aucun rapport.")
 
-            # Ajouter le contexte web si disponible
+            # Ajouter le contexte web si disponible (désactivé pour le premier message)
             web_context = ""
-            if target.get('website'):
-                self.logger.info(f"🕵️  Recherche Perplexica sur le site : {target['website']}...")
-                search_query = f"Fais un résumé de l'activité du site {target['website']} et de son propriétaire {target.get('uid', '')} pour comprendre ses centres d'intérêt."
-                web_context = self._call_perplexica(search_query)
-                self.logger.info("✅ Contexte web obtenu.")
-
-            # Construire la description complète pour la banque avec focus sur la personnalisation
-            target_description = f"""MODE PERSONA - PERSONNALISATION AVANCÉE
-
-Rapport Analyste: {analyst_report}
-Prospect: {json.dumps(target, indent=2, ensure_ascii=False)}"""
-
-            if web_context:
-                target_description += f"\nContexte Web: {web_context}"
             
-            target_description += f"""
+            # Récupérer le site web depuis les métadonnées enrichies
+            target_website = ""
+            try:
+                kb_file = self.shared_state['config']['enriched_prospects_file']
+                if os.path.exists(kb_file):
+                    with open(kb_file, 'r') as f:
+                        knowledge_base = json.load(f)
+                    
+                    pubkey = target.get('pubkey')
+                    if pubkey and pubkey in knowledge_base:
+                        profile_info = knowledge_base[pubkey]
+                        profile = profile_info.get('profile', {})
+                        if profile and '_source' in profile:
+                            source = profile['_source']
+                            socials = source.get('socials', [])
+                            for social in socials:
+                                if isinstance(social, dict) and social.get('type') == 'web':
+                                    target_website = social.get('url', '')
+                                    break
+                                elif isinstance(social, str) and 'http' in social:
+                                    target_website = social
+                                    break
+            except Exception as e:
+                self.logger.debug(f"⚠️ Erreur lors de la récupération du site web : {e}")
+            
+            if target_website:
+                self.logger.debug(f"🔍 Site web détecté pour {target.get('uid', 'Unknown')} : {target_website}")
+            else:
+                self.logger.debug(f"🔍 Pas de site web pour {target.get('uid', 'Unknown')}")
 
-INSTRUCTIONS SPÉCIALES MODE PERSONA :
+            # Construire la description complète pour le persona avec focus sur la personnalisation
+            target_description = f"""PROFIL DU PROSPECT :
+
+IDENTITÉ : {target.get('uid', 'Unknown')}
+SITE WEB : {target_website}
+TAGS : {', '.join(target.get('tags', []))}
+DESCRIPTION : {target.get('description', '...')}
+RAPPORT ANALYSTE : {analyst_report}
+
+CONTEXTE WEB : {web_context if web_context else 'Non disponible'}
+
+INSTRUCTIONS DE PERSONNALISATION :
+- Adresse-toi directement à {target.get('uid', 'le prospect')}
 - Utilise l'archetype "{selected_bank.get('archetype', 'Non défini')}" pour adapter ton ton
-- Personnalise le message en fonction du profil spécifique du prospect
-- Utilise le vocabulaire et les arguments de la banque "{selected_bank['name']}"
-- Crée une connexion émotionnelle basée sur les centres d'intérêt identifiés
-- Sois authentique et adapte le style au profil analysé
-- Adresse-toi directement à {target.get('uid', 'le prospect')}"""
+- Personnalise le message en fonction de ses centres d'intérêt spécifiques
+- Crée une connexion émotionnelle basée sur son profil unique
+- Sois authentique et adapte le style à sa personnalité"""
 
-            # Générer le message avec la banque
-            message_content = self._generate_message_with_bank(selected_bank, target_description)
+            # Récupérer la langue du profil
+            target_language = self._get_target_language(target)
+            
+            # Générer le message avec le persona dans la langue cible
+            message_content = self._generate_message_with_bank(selected_bank, target_description, target_language)
             
             return message_content
             
@@ -1263,7 +1485,7 @@ INSTRUCTIONS SPÉCIALES MODE PERSONA :
             return None
 
     def _generate_message_with_persona_mode(self, selected_bank, treasury_pubkey):
-        """Génère un message en mode Persona avec la banque sélectionnée automatiquement (méthode legacy)"""
+        """Génère un message en mode Persona avec le persona sélectionnée automatiquement (méthode legacy)"""
         return self._generate_personalized_message_with_persona_mode(selected_bank, treasury_pubkey, self.shared_state['targets'][0])
 
     def _generate_personalized_message_with_bank_mode(self, selected_bank, target):
@@ -1271,26 +1493,54 @@ INSTRUCTIONS SPÉCIALES MODE PERSONA :
         self.logger.info(f"🎭 Mode Auto : Génération du message personnalisé pour {target.get('uid', 'Unknown')}")
         
         try:
-            # Construire le contexte pour la banque
+            # Construire le contexte pour le persona
             analyst_report = self.shared_state.get('analyst_report', "Aucun rapport.")
 
-            # Ajouter le contexte web si disponible
+            # Ajouter le contexte web si disponible (désactivé pour le premier message)
             web_context = ""
-            if target.get('website'):
-                self.logger.info(f"🕵️  Recherche Perplexica sur le site : {target['website']}...")
-                search_query = f"Fais un résumé de l'activité du site {target['website']} et de son propriétaire {target.get('uid', '')} pour comprendre ses centres d'intérêt."
-                web_context = self._call_perplexica(search_query)
-                self.logger.info("✅ Contexte web obtenu.")
+            
+            # Récupérer le site web depuis les métadonnées enrichies
+            target_website = ""
+            try:
+                kb_file = self.shared_state['config']['enriched_prospects_file']
+                if os.path.exists(kb_file):
+                    with open(kb_file, 'r') as f:
+                        knowledge_base = json.load(f)
+                    
+                    pubkey = target.get('pubkey')
+                    if pubkey and pubkey in knowledge_base:
+                        profile_info = knowledge_base[pubkey]
+                        profile = profile_info.get('profile', {})
+                        if profile and '_source' in profile:
+                            source = profile['_source']
+                            socials = source.get('socials', [])
+                            for social in socials:
+                                if isinstance(social, dict) and social.get('type') == 'web':
+                                    target_website = social.get('url', '')
+                                    break
+                                elif isinstance(social, str) and 'http' in social:
+                                    target_website = social
+                                    break
+            except Exception as e:
+                self.logger.debug(f"⚠️ Erreur lors de la récupération du site web : {e}")
+            
+            if target_website:
+                self.logger.debug(f"🔍 Site web détecté pour {target.get('uid', 'Unknown')} : {target_website}")
+            else:
+                self.logger.debug(f"🔍 Pas de site web pour {target.get('uid', 'Unknown')}")
 
-            # Construire la description complète pour la banque
+            # Construire la description complète pour le persona
             target_description = f"Rapport Analyste: {analyst_report}"
             if web_context:
                 target_description += f"\nContexte Web: {web_context}"
             target_description += f"\nCible spécifique: {json.dumps(target, indent=2, ensure_ascii=False)}"
             target_description += f"\nAdresse-toi directement à {target.get('uid', 'le prospect')}"
 
-            # Générer le message avec la banque
-            message_content = self._generate_message_with_bank(selected_bank, target_description)
+            # Récupérer la langue du profil
+            target_language = self._get_target_language(target)
+            
+            # Générer le message avec le persona dans la langue cible
+            message_content = self._generate_message_with_bank(selected_bank, target_description, target_language)
             
             return message_content
             
@@ -1299,7 +1549,7 @@ INSTRUCTIONS SPÉCIALES MODE PERSONA :
             return None
 
     def _generate_message_with_bank_mode(self, selected_bank):
-        """Génère un message en mode Auto avec la banque sélectionnée automatiquement (méthode legacy)"""
+        """Génère un message en mode Auto avec le persona sélectionnée automatiquement (méthode legacy)"""
         return self._generate_personalized_message_with_bank_mode(selected_bank, self.shared_state['targets'][0])
 
     def _generate_personalized_message_with_classic_mode(self, banks_config, treasury_pubkey, target):
@@ -1307,7 +1557,7 @@ INSTRUCTIONS SPÉCIALES MODE PERSONA :
         self.logger.info(f"📝 Mode Classique : Génération du message personnalisé pour {target.get('uid', 'Unknown')}")
         
         try:
-            # Proposer le choix d'une banque de contexte
+            # Proposer le choix d'un persona de contexte
             selected_bank = self._choose_bank_for_classic_method(banks_config)
             
             # --- Construction du Prompt Final ---
@@ -1319,13 +1569,37 @@ INSTRUCTIONS SPÉCIALES MODE PERSONA :
             # Remplacer le placeholder du portefeuille Trésor
             final_prompt = final_prompt.replace('[UPLANET_TREASURY_G1PUB]', treasury_pubkey)
 
-            # 2. Ajouter le contexte de la banque si sélectionnée
+            # 2. Ajouter le contexte du persona si sélectionnée
             if selected_bank:
-                self.logger.info(f"🎭 Contexte de la banque : {selected_bank['name']}")
-                corpus = selected_bank.get('corpus', {})
+                self.logger.info(f"🎭 Contexte du persona : {selected_bank['name']}")
                 
-                final_prompt += f"\n\n--- CONTEXTE DE LA BANQUE DE MÉMOIRE ---"
-                final_prompt += f"\nArchétype : {selected_bank.get('archetype', 'Non défini')}"
+                # Récupérer la langue du profil
+                target_language = self._get_target_language(target)
+                
+                # Utiliser le contenu multilingue si disponible
+                multilingual = selected_bank.get('multilingual', {})
+                if target_language in multilingual:
+                    # Utiliser le contenu multilingue
+                    lang_content = multilingual[target_language]
+                    corpus = {
+                        'tone': lang_content.get('tone', ''),
+                        'vocabulary': lang_content.get('vocabulary', []),
+                        'arguments': lang_content.get('arguments', []),
+                        'examples': lang_content.get('examples', [])
+                    }
+                    bank_name = lang_content.get('name', selected_bank.get('name', ''))
+                    bank_archetype = lang_content.get('archetype', selected_bank.get('archetype', ''))
+                    self.logger.info(f"🌍 Utilisation du contenu multilingue pour {target_language}")
+                else:
+                    # Fallback vers le contenu français
+                    corpus = selected_bank.get('corpus', {})
+                    bank_name = selected_bank.get('name', '')
+                    bank_archetype = selected_bank.get('archetype', '')
+                    self.logger.info(f"🌍 Utilisation du contenu français (fallback)")
+                
+                final_prompt += f"\n\n--- CONTEXTE DU PERSONA DE MÉMOIRE ---"
+                final_prompt += f"\nArchétype : {bank_archetype}"
+                final_prompt += f"\nNom du persona : {bank_name}"
                 final_prompt += f"\nThèmes : {', '.join(selected_bank.get('themes', []))}"
                 final_prompt += f"\nTon : {corpus.get('tone', 'Non défini')}"
                 final_prompt += f"\nVocabulaire clé : {', '.join(corpus.get('vocabulary', []))}"
@@ -1373,7 +1647,7 @@ INSTRUCTIONS SPÉCIALES MODE PERSONA :
             self.logger.info("🧠 Prompt final construit. Interrogation de l'IA locale via question.py...")
 
             # --- Appel à l'IA locale ---
-            message_content = self._call_ia_for_writing(final_prompt)
+            message_content = self._call_ia_for_writing(final_prompt, target_language)
             
             # Appliquer l'injection de liens
             message_content = self._inject_links(message_content, self.shared_state['config'])
@@ -1385,5 +1659,5 @@ INSTRUCTIONS SPÉCIALES MODE PERSONA :
             return None
 
     def _generate_message_with_classic_mode(self, banks_config, treasury_pubkey):
-        """Génère un message en mode Classique avec choix manuel de banque (méthode legacy)"""
+        """Génère un message en mode Classique avec choix manuel de persona (méthode legacy)"""
         return self._generate_personalized_message_with_classic_mode(banks_config, treasury_pubkey, self.shared_state['targets'][0])

@@ -63,6 +63,7 @@ class AstroBotOrchestrator:
         os.makedirs(self.shared_state['config']['workspace'], exist_ok=True)
         self.ensure_prospect_file_is_set()
         self.setup_treasury_wallet()
+        self.load_existing_targets()
 
     def setup_logging(self):
         """Met en place un logging centralisé vers la console et un fichier."""
@@ -98,23 +99,70 @@ class AstroBotOrchestrator:
             # Construire un chemin absolu et robuste vers le script keygen
             keygen_script = os.path.join(os.path.expanduser("~/.zen"), "Astroport.ONE", "tools", "keygen")
             
-            command = [keygen_script, '-t', 'duniter', f"{uplanet_name}.G1", f"{uplanet_name}.G1"]
-            
-            result = subprocess.run(command, capture_output=True, text=True, check=True)
-            treasury_pubkey = result.stdout.strip()
+            if os.path.exists(keygen_script):
+                command = [keygen_script, '-t', 'duniter', f"{uplanet_name}.G1", f"{uplanet_name}.G1"]
+                result = subprocess.run(command, capture_output=True, text=True, check=True)
+                treasury_pubkey = result.stdout.strip()
             
             if treasury_pubkey:
                 self.shared_state['config']['uplanet_treasury_g1pub'] = treasury_pubkey
-                self.logger.info(f"Portefeuille Trésor initialisé : {treasury_pubkey[:20]}...")
+                self.logger.info(f"✅ Portefeuille Trésor configuré : {treasury_pubkey[:10]}...")
             else:
-                raise Exception("La commande keygen n'a retourné aucune clé.")
-
-        except FileNotFoundError:
-            self.logger.error("Le script 'keygen' est introuvable. Impossible d'initialiser le portefeuille Trésor.")
-        except subprocess.CalledProcessError as e:
-            self.logger.error(f"Erreur lors de la génération de la clé du Trésor : {e.stderr}")
+                self.logger.warning(f"⚠️ Script keygen non trouvé : {keygen_script}")
+                self.shared_state['config']['uplanet_treasury_g1pub'] = None
+            
         except Exception as e:
-            self.logger.error(f"Une erreur inattendue est survenue lors de l'initialisation du Trésor : {e}")
+            self.logger.error(f"❌ Erreur lors de la configuration du portefeuille Trésor : {e}")
+            self.shared_state['config']['uplanet_treasury_g1pub'] = None
+
+    def load_existing_targets(self):
+        """Charge automatiquement les cibles existantes au démarrage"""
+        targets_file = os.path.join(self.shared_state['config']['workspace'], 'todays_targets.json')
+        
+        if os.path.exists(targets_file):
+            try:
+                with open(targets_file, 'r') as f:
+                    targets = json.load(f)
+                
+                if targets:
+                    self.shared_state['targets'] = targets
+                    self.logger.info(f"✅ {len(targets)} cible(s) chargée(s) depuis 'todays_targets.json'")
+                    
+                    # Mettre à jour le statut de l'Agent Analyste
+                    self.shared_state['status']['AnalystAgent'] = f"{len(targets)} cible(s) sélectionnée(s)"
+                    
+                    # Afficher un résumé des cibles
+                    languages = {}
+                    countries = {}
+                    themes = set()
+                    
+                    for target in targets:
+                        metadata = target.get('metadata', {})
+                        languages[metadata.get('language', 'unknown')] = languages.get(metadata.get('language', 'unknown'), 0) + 1
+                        countries[metadata.get('country', 'unknown')] = countries.get(metadata.get('country', 'unknown'), 0) + 1
+                        themes.update(metadata.get('tags', []))
+                    
+                    self.logger.info(f"📊 Résumé des cibles :")
+                    if languages:
+                        lang_str = ", ".join([f"{lang}({count})" for lang, count in languages.items()])
+                        self.logger.info(f"   🌍 Langues : {lang_str}")
+                    if countries:
+                        country_str = ", ".join([f"{country}({count})" for country, count in countries.items() if country != 'unknown'])
+                        if country_str:
+                            self.logger.info(f"   🌎 Pays : {country_str}")
+                    if themes:
+                        theme_str = ", ".join(list(themes)[:5])  # Limiter à 5 thèmes
+                        self.logger.info(f"   🏷️ Thèmes principaux : {theme_str}")
+                    
+                else:
+                    self.logger.info("📦 Fichier 'todays_targets.json' vide")
+                    
+            except (IOError, json.JSONDecodeError) as e:
+                self.logger.warning(f"⚠️ Erreur lors du chargement des cibles : {e}")
+                self.shared_state['targets'] = []
+        else:
+            self.logger.debug("📦 Aucun fichier 'todays_targets.json' trouvé")
+            self.shared_state['targets'] = []
 
 
     def ensure_prospect_file_is_set(self):
@@ -159,7 +207,16 @@ class AstroBotOrchestrator:
             try:
                 with open(targets_file, 'r') as f:
                     targets = json.load(f)
-                self.logger.info(f"📦 Workspace: {len(targets)} cible(s) en attente dans 'todays_targets.json'")
+                
+                if targets:
+                    # Vérifier si les cibles sont chargées en mémoire
+                    if self.shared_state['targets']:
+                        self.logger.info(f"📦 Workspace: {len(targets)} cible(s) chargée(s) et prêtes")
+                    else:
+                        self.logger.info(f"📦 Workspace: {len(targets)} cible(s) en attente dans 'todays_targets.json' (recharger avec option 1)")
+                else:
+                    self.logger.info("📦 Workspace: Fichier 'todays_targets.json' vide")
+                    
             except (IOError, json.JSONDecodeError):
                  self.logger.warning("📦 Workspace: Fichier de cibles corrompu ou illisible.")
         else:
@@ -189,15 +246,28 @@ class AstroBotOrchestrator:
             print("1. Lancer l'Agent Analyste (Identifier les cibles)")
             print("2. Lancer l'Agent Stratège (Rédiger le message)")
             print("3. Lancer l'Agent Opérateur (Envoyer la campagne)")
-            print("4. Gérer les Banques de Mémoire Thématiques")
+            print("")
+            print("4. Gérer les Mémoires Persona (0-9)")
             print("5. Gérer les Interactions de l'Opérateur")
-            print("6. Quitter")
+            print("")
+            # print("6. 🔄 Recharger les cibles existantes")
+            print("7. Quitter")
 
             choice = input("> ")
 
             if choice == "1":
-                self.run_analyst_submenu()
-                if "sélectionné" in self.shared_state['status'].get('AnalystAgent', ''):
+                result = self.run_analyst_submenu()
+                if result == "continue":
+                    # L'utilisateur veut continuer vers le Stratège
+                    self.agents['stratège'].run()
+                    if "Message sauvegardé" in self.shared_state['status'].get('StrategistAgent', ''):
+                        last_action = "strategy_complete"
+                    else:
+                        last_action = None
+                elif result == "quit":
+                    self.logger.info("À bientôt, commandant ! 👋")
+                    break
+                elif "sélectionné" in self.shared_state['status'].get('AnalystAgent', ''):
                     last_action = "analysis_complete"
                 else:
                     last_action = None
@@ -217,6 +287,14 @@ class AstroBotOrchestrator:
                 self.run_operator_submenu()
                 last_action = None
             elif choice == "6":
+                self.load_existing_targets()
+                if self.shared_state['targets']:
+                    last_action = "analysis_complete"
+                    self.logger.info("✅ Cibles rechargées. Vous pouvez maintenant lancer l'Agent Stratège (2).")
+                else:
+                    self.logger.info("⚠️ Aucune cible à recharger. Utilisez l'Agent Analyste (1) pour sélectionner des cibles.")
+                    last_action = None
+            elif choice == "7":
                 self.logger.info("À bientôt, commandant ! 👋")
                 break
             else:
@@ -227,20 +305,30 @@ class AstroBotOrchestrator:
     def run_analyst_submenu(self):
         progress = self.agents['analyste'].get_analysis_progress()
         total = progress.get('total', 0)
+        gps_prospects = progress.get('gps_prospects', 0)
         lang_total = progress.get('language', 0)
         tags_total = progress.get('tags', 0)
 
         print("\n--- Menu Analyste ---")
         print(f"Statut de la base de connaissance : {total} profils au total.\n")
-        print("Analyse et Enrichissement :")
-        print(f"1. Lancer l'analyse Géo-Linguistique         ({lang_total} / {total} profils analysés)")
-        print(f"2. Lancer l'analyse par Thèmes (Compétences, etc.) ({tags_total} / {total} profils analysés)")
-        print("\nCiblage et Export :")
-        print("3. Lancer une campagne à partir d'un Thème")
-        print("4. Mode Test (cible unique pour validation)")
-        print("\n🎭 Création Automatique de Personas :")
-        print("5. Créer des personas basés sur les thèmes détectés (banques 5-9)")
-        print("6. Retour")
+        
+        print("🚀 INITIALISATION ET ANALYSE :")
+        print(f"1. 🌍 Analyse Géo-Linguistique         ({lang_total} / {gps_prospects} profils avec GPS)")
+        print(f"2. 🏷️  Analyse par Thèmes (Compétences, etc.) ({tags_total} / {total} profils analysés)")
+        
+        print("\n🔧 PERSONA - RAFFINAGE ET OPTIMISATION :")
+        print("3. 🎭 Créer Banques persona (5-9) selon les Thèmes détectés")
+        print("4. 🌍 Ajouter Traductions Banque(s) persona (au choix, 1, 3, ou 0-3)")
+        print("5. 🔄 Optimiser les Thèmes (recalculer le Top 50)")
+        print("6. 🧪 Mode Test (cible unique pour validation)")
+        
+        print("\n🎯 CIBLAGE ET EXPORT :")
+        print("7. 🎯 Ciblage Avancé Multi-Sélection (Thèmes + Filtres)")
+        print("8. 🌍 Cibler par Langue")
+        print("9. 🌍 Cibler par Pays")
+        print("10. 🌍 Cibler par Région")
+        print("11. 📊 Lancer une campagne à partir d'un Thème")
+        print("12. ↩️  Retour")
         
         choice = input("> ")
         
@@ -249,12 +337,44 @@ class AstroBotOrchestrator:
         elif choice == "2":
             self.agents['analyste'].run_thematic_analysis()
         elif choice == "3":
-            self.agents['analyste'].select_cluster_from_tags()
-        elif choice == "4":
-            self.agents['analyste'].run_test_mode()
-        elif choice == "5":
             self.agents['analyste'].create_automatic_personas()
+        elif choice == "4":
+            self.agents['analyste'].translate_persona_bank()
+        elif choice == "5":
+            self.agents['analyste'].optimize_thematic_analysis()
         elif choice == "6":
+            self.agents['analyste'].run_test_mode()
+        elif choice == "7":
+            result = self.agents['analyste'].advanced_multi_selection_targeting()
+            if result == "continue":
+                return "continue"
+            elif result == "quit":
+                return "quit"
+        elif choice == "8":
+            result = self.agents['analyste'].select_cluster_by_language()
+            if result == "continue":
+                return "continue"
+            elif result == "quit":
+                return "quit"
+        elif choice == "9":
+            result = self.agents['analyste'].select_cluster_by_country()
+            if result == "continue":
+                return "continue"
+            elif result == "quit":
+                return "quit"
+        elif choice == "10":
+            result = self.agents['analyste'].select_cluster_by_region()
+            if result == "continue":
+                return "continue"
+            elif result == "quit":
+                return "quit"
+        elif choice == "11":
+            result = self.agents['analyste'].select_cluster_from_tags()
+            if result == "continue":
+                return "continue"
+            elif result == "quit":
+                return "quit"
+        elif choice == "12":
             return
         else:
             self.logger.warning("Choix invalide.")
@@ -290,28 +410,34 @@ class AstroBotOrchestrator:
         print("\n📚 CONSULTATION DE L'HISTORIQUE")
         print("-" * 40)
         
-        # Demander le slot
-        try:
-            slot = input("Numéro du slot (0-11, Entrée pour 0) : ").strip()
-            slot = int(slot) if slot else 0
-            if not (0 <= slot <= 11):
-                print("❌ Slot invalide")
-                return
-        except ValueError:
-            print("❌ Entrée invalide")
-            return
-        
-        # Demander si on veut voir une cible spécifique
-        target_pubkey = input("Clé publique de la cible (Entrée pour voir toutes) : ").strip()
-        
-        if target_pubkey:
-            self.agents['opérateur'].view_interaction_history(target_pubkey, slot)
-        else:
-            self.agents['opérateur'].view_interaction_history(slot=slot)
+        # Utiliser la nouvelle interface améliorée
+        self.agents['opérateur'].view_interaction_history()
 
     def _process_incoming_response(self):
         """Interface pour traiter une réponse reçue"""
         print("\n📨 TRAITEMENT D'UNE RÉPONSE REÇUE")
+        print("-" * 40)
+        
+        # Option 1: Lire automatiquement les nouveaux messages
+        print("Options :")
+        print("1. Lire les nouveaux messages (Jaklis)")
+        print("2. Traiter une réponse manuelle")
+        
+        choice = input("> ")
+        
+        if choice == "1":
+            # Utiliser la fonction de lecture automatique
+            self.agents['opérateur']._run_receive_messages()
+        elif choice == "2":
+            # Interface manuelle
+            self._process_manual_response()
+        else:
+            print("❌ Choix invalide")
+            return
+
+    def _process_manual_response(self):
+        """Interface manuelle pour traiter une réponse"""
+        print("\n📝 TRAITEMENT MANUEL D'UNE RÉPONSE")
         print("-" * 40)
         
         # Demander les informations
