@@ -1047,7 +1047,12 @@ class OperatorAgent(Agent):
         # Récupérer les informations du prospect depuis la base de connaissance
         prospect_info = self._get_prospect_info(target_pubkey)
         
-        # Enrichir avec Perplexica si le message contient des questions ou des références
+        # 🎯 Détection du type de message
+        message_lower = incoming_message.lower()
+        is_search_request = '#search' in message_lower or '#recherche' in message_lower
+        is_info_request = any(tag in message_lower for tag in ['#info', '#help', '#aide', '#documentation', '#doc', '#tutorial'])
+        
+        # Enrichir avec Perplexica si nécessaire
         perplexica_context = ""
         if self._should_use_perplexica(incoming_message):
             self.logger.info(f"🔍 Utilisation de Perplexica pour enrichir la réponse à {target_uid}")
@@ -1056,8 +1061,10 @@ class OperatorAgent(Agent):
         # Sélectionner la banque de mémoire appropriée
         selected_bank = self._select_bank_for_response(prospect_info, incoming_message)
         
-        # Construire le contexte enrichi pour l'IA
-        context = f"""Tu es l'Agent Stratège d'UPlanet, spécialisé dans les réponses aux conversations.
+        # 🎯 Construire le contexte adapté au type de demande
+        if is_search_request:
+            # Mode recherche web - réponse plus détaillée
+            context = f"""Tu es l'Agent Stratège d'UPlanet, spécialisé dans les réponses aux recherches web.
 
 INFORMATIONS DU PROSPECT :
 - UID : {target_uid}
@@ -1072,18 +1079,96 @@ BANQUE DE MÉMOIRE SÉLECTIONNÉE :
 
 HISTORIQUE DES INTERACTIONS :
 """
-        for interaction in history[-3:]:  # Dernières 3 interactions
-            context += f"- Message envoyé : {interaction['message_sent']}\n"
-            if interaction.get('response_received'):
-                context += f"- Réponse reçue : {interaction['response_received']}\n"
-            context += f"- Date : {interaction['timestamp']}\n\n"
-        
-        context += f"MESSAGE REÇU MAINTENANT : {incoming_message}\n\n"
-        
-        if perplexica_context:
-            context += f"CONTEXTE ENRICHIT PAR PERPLEXICA : {perplexica_context}\n\n"
-        
-        context += """INSTRUCTIONS POUR LA RÉPONSE :
+            for interaction in history[-3:]:  # Dernières 3 interactions
+                context += f"- Message envoyé : {interaction['message_sent']}\n"
+                if interaction.get('response_received'):
+                    context += f"- Réponse reçue : {interaction['response_received']}\n"
+                context += f"- Date : {interaction['timestamp']}\n\n"
+            
+            context += f"RECHERCHE DEMANDÉE : {incoming_message}\n\n"
+            
+            if perplexica_context:
+                context += f"RÉSULTATS DE LA RECHERCHE WEB : {perplexica_context}\n\n"
+            
+            context += """INSTRUCTIONS POUR LA RÉPONSE DE RECHERCHE :
+1. Présente les résultats de recherche de manière structurée et claire
+2. Inclus les informations les plus pertinentes trouvées
+3. Ajoute des liens vers les sources si disponibles
+4. Adapte le contenu aux centres d'intérêt du prospect
+5. Utilise le ton de la banque de mémoire sélectionnée
+6. Reste professionnel et engageant
+7. Limite la réponse à 4-5 phrases maximum pour les recherches
+
+Génère une réponse de recherche appropriée :"""
+            
+        elif is_info_request:
+            # Mode information - réponse structurée
+            context = f"""Tu es l'Agent Stratège d'UPlanet, spécialisé dans les réponses informatives.
+
+INFORMATIONS DU PROSPECT :
+- UID : {target_uid}
+- Langue : {prospect_info.get('language', 'fr')}
+- Thèmes d'intérêt : {', '.join(prospect_info.get('tags', []))}
+- Description : {prospect_info.get('description', 'Non disponible')}
+
+BANQUE DE MÉMOIRE SÉLECTIONNÉE :
+- Nom : {selected_bank.get('name', 'Par défaut')}
+- Archétype : {selected_bank.get('archetype', 'Non défini')}
+- Ton : {selected_bank.get('corpus', {}).get('tone', 'Professionnel')}
+
+HISTORIQUE DES INTERACTIONS :
+"""
+            for interaction in history[-3:]:  # Dernières 3 interactions
+                context += f"- Message envoyé : {interaction['message_sent']}\n"
+                if interaction.get('response_received'):
+                    context += f"- Réponse reçue : {interaction['response_received']}\n"
+                context += f"- Date : {interaction['timestamp']}\n\n"
+            
+            context += f"DEMANDE D'INFORMATION : {incoming_message}\n\n"
+            
+            if perplexica_context:
+                context += f"INFORMATIONS CONTEXTUELLES : {perplexica_context}\n\n"
+            
+            context += """INSTRUCTIONS POUR LA RÉPONSE INFORMATIVE :
+1. Fournis des informations claires et structurées
+2. Utilise les données contextuelles pour enrichir la réponse
+3. Inclus des liens vers la documentation si pertinent
+4. Adapte le contenu au niveau technique du prospect
+5. Utilise le ton de la banque de mémoire sélectionnée
+6. Reste professionnel et engageant
+7. Limite la réponse à 3-4 phrases maximum
+
+Génère une réponse informative appropriée :"""
+            
+        else:
+            # Mode conversation classique
+            context = f"""Tu es l'Agent Stratège d'UPlanet, spécialisé dans les réponses aux conversations.
+
+INFORMATIONS DU PROSPECT :
+- UID : {target_uid}
+- Langue : {prospect_info.get('language', 'fr')}
+- Thèmes d'intérêt : {', '.join(prospect_info.get('tags', []))}
+- Description : {prospect_info.get('description', 'Non disponible')}
+
+BANQUE DE MÉMOIRE SÉLECTIONNÉE :
+- Nom : {selected_bank.get('name', 'Par défaut')}
+- Archétype : {selected_bank.get('archetype', 'Non défini')}
+- Ton : {selected_bank.get('corpus', {}).get('tone', 'Professionnel')}
+
+HISTORIQUE DES INTERACTIONS :
+"""
+            for interaction in history[-3:]:  # Dernières 3 interactions
+                context += f"- Message envoyé : {interaction['message_sent']}\n"
+                if interaction.get('response_received'):
+                    context += f"- Réponse reçue : {interaction['response_received']}\n"
+                context += f"- Date : {interaction['timestamp']}\n\n"
+            
+            context += f"MESSAGE REÇU MAINTENANT : {incoming_message}\n\n"
+            
+            if perplexica_context:
+                context += f"CONTEXTE ENRICHIT PAR PERPLEXICA : {perplexica_context}\n\n"
+            
+            context += """INSTRUCTIONS POUR LA RÉPONSE :
 1. Reconnais le contexte de la conversation et le profil du prospect
 2. Réponds de manière personnalisée et engageante
 3. Utilise le ton et le vocabulaire de la banque de mémoire sélectionnée
@@ -1140,7 +1225,16 @@ Génère une réponse appropriée :"""
     def _should_auto_respond(self, message):
         """Détermine si une réponse automatique est appropriée en utilisant l'IA"""
         try:
-            # Construire le prompt d'analyse
+            message_lower = message.lower()
+            
+            # 🎯 PRIORITÉ 1 : Tags de recherche explicites - TOUJOURS répondre automatiquement
+            search_tags = ['#search', '#recherche', '#info', '#help', '#aide', '#documentation', '#doc', '#tutorial']
+            for tag in search_tags:
+                if tag in message_lower:
+                    self.logger.info(f"🔍 Tag {tag} détecté - Réponse automatique obligatoire")
+                    return True
+            
+            # Construire le prompt d'analyse pour les autres cas
             analysis_prompt = f"""Analyse cette réponse reçue dans le contexte d'une campagne UPlanet et détermine si elle nécessite une réponse automatique.
 
 MESSAGE REÇU : "{message}"
@@ -1421,7 +1515,19 @@ ANALYSE :"""
         """Détermine si Perplexica doit être utilisé pour enrichir la réponse"""
         message_lower = message.lower()
         
-        # Mots-clés qui indiquent des questions techniques ou des références
+        # 🎯 PRIORITÉ 1 : Tag #search explicite
+        if '#search' in message_lower or '#recherche' in message_lower:
+            self.logger.info("🔍 Tag #search détecté - Activation Perplexica prioritaire")
+            return True
+        
+        # 🎯 PRIORITÉ 2 : Tags de recherche spécifiques
+        search_tags = ['#info', '#help', '#aide', '#documentation', '#doc', '#tutorial']
+        for tag in search_tags:
+            if tag in message_lower:
+                self.logger.info(f"🔍 Tag {tag} détecté - Activation Perplexica")
+                return True
+        
+        # 🎯 PRIORITÉ 3 : Mots-clés techniques avancés
         technical_keywords = [
             'comment', 'comment faire', 'où', 'quand', 'combien', 'prix', 'coût',
             'technique', 'technologie', 'blockchain', 'crypto', 'nostr', 'ipfs',
@@ -1435,7 +1541,7 @@ ANALYSE :"""
             if keyword in message_lower:
                 return True
         
-        # Vérifier si le message contient des questions
+        # 🎯 PRIORITÉ 4 : Questions explicites
         if any(char in message for char in ['?', 'comment', 'où', 'quand', 'combien']):
             return True
         
@@ -1444,12 +1550,64 @@ ANALYSE :"""
     def _call_perplexica_for_response(self, message, prospect_info):
         """Appelle Perplexica pour enrichir le contexte de la réponse"""
         try:
-            # Construire une requête contextuelle
+            message_lower = message.lower()
+            
+            # 🎯 Détection du type de recherche
+            is_search_request = '#search' in message_lower or '#recherche' in message_lower
+            is_info_request = any(tag in message_lower for tag in ['#info', '#help', '#aide', '#documentation', '#doc', '#tutorial'])
+            
+            # 🔍 Nettoyer le message des tags pour extraire la requête
+            clean_message = message
+            search_tags = ['#search', '#recherche', '#info', '#help', '#aide', '#documentation', '#doc', '#tutorial']
+            for tag in search_tags:
+                clean_message = clean_message.replace(tag, '').replace(tag.upper(), '')
+            
+            clean_message = clean_message.strip()
+            
+            if is_search_request:
+                # 🎯 Mode recherche web directe
+                self.logger.info(f"🔍 Recherche web Perplexica pour : {clean_message}")
+                query = f"""Recherche web : {clean_message}
+
+Contexte UPlanet :
+- Prospect : {prospect_info.get('description', 'Non disponible')}
+- Thèmes d'intérêt : {', '.join(prospect_info.get('tags', []))}
+
+Instructions :
+1. Recherche des informations récentes et pertinentes sur le web
+2. Privilégie les sources officielles et fiables
+3. Inclus des liens vers la documentation si disponible
+4. Réponse structurée et concise (max 300 mots)
+5. Adapte le contenu aux centres d'intérêt du prospect
+
+Résultat de la recherche :"""
+                
+            elif is_info_request:
+                # 🎯 Mode information contextuelle
+                self.logger.info(f"📚 Recherche d'information contextuelle pour : {clean_message}")
+                query = f"""Analyse cette demande d'information dans le contexte d'UPlanet :
+
+Prospect : {prospect_info.get('description', 'Non disponible')}
+Thèmes d'intérêt : {', '.join(prospect_info.get('tags', []))}
+Demande : {clean_message}
+
+Fournis des informations pertinentes et structurées, en te concentrant sur :
+- Les aspects techniques d'UPlanet si demandé
+- Les informations sur MULTIPASS, G1, blockchain
+- Les liens vers la documentation ou les ressources
+- Les aspects communautaires et participatifs
+- Les guides pratiques et tutoriels
+
+Réponse structurée et ciblée :"""
+                
+            else:
+                # 🎯 Mode enrichissement classique
+                self.logger.info(f"🔍 Enrichissement contextuel pour : {clean_message}")
             query = f"""Analyse cette question/réponse dans le contexte d'UPlanet et du prospect :
 
 Prospect : {prospect_info.get('description', 'Non disponible')}
 Thèmes d'intérêt : {', '.join(prospect_info.get('tags', []))}
-Message reçu : {message}
+Message reçu : {clean_message}
 
 Fournis des informations pertinentes pour répondre de manière appropriée, en te concentrant sur :
 - Les aspects techniques d'UPlanet si demandé
@@ -1466,11 +1624,21 @@ Réponse concise et ciblée :"""
                 capture_output=True, text=True, check=True
             )
             
-            return result.stdout.strip()
+            response = result.stdout.strip()
+            
+            # 🎯 Ajouter des métadonnées pour le suivi
+            if is_search_request:
+                self.logger.info(f"✅ Recherche web Perplexica terminée ({len(response)} caractères)")
+            elif is_info_request:
+                self.logger.info(f"✅ Recherche d'information terminée ({len(response)} caractères)")
+            else:
+                self.logger.info(f"✅ Enrichissement contextuel terminé ({len(response)} caractères)")
+            
+            return response
             
         except Exception as e:
-            self.logger.error(f"Erreur lors de l'appel Perplexica : {e}")
-            return ""
+            self.logger.error(f"❌ Erreur lors de l'appel Perplexica : {e}")
+            return f"Erreur lors de la recherche : {e}"
 
     def _select_bank_for_response(self, prospect_info, message):
         """Sélectionne la banque de mémoire appropriée pour la réponse"""

@@ -3,6 +3,9 @@ import json
 import os
 import subprocess
 import re
+import requests
+from bs4 import BeautifulSoup
+import html2text
 
 class StrategistAgent(Agent):
     """
@@ -1500,14 +1503,15 @@ ANALYSE :"""
             # Construire le contexte enrichi pour le persona
             analyst_report = self.shared_state.get('analyst_report', "Aucun rapport.")
 
-            # Ajouter le contexte web si disponible (désactivé pour le premier message)
+            # Récupération du contenu du site web si disponible
             web_context = ""
-            
-            # Récupérer le site web depuis les métadonnées enrichies
             target_website = self._get_target_website(target)
             
             if target_website:
                 self.logger.debug(f"🔍 Site web détecté pour {target.get('uid', 'Unknown')} : {target_website}")
+                self.logger.info(f"🌐 Récupération du contenu du site : {target_website}...")
+                web_context = self._fetch_website_content(target_website)
+                self.logger.info("✅ Contenu web récupéré.")
             else:
                 self.logger.debug(f"🔍 Pas de site web pour {target.get('uid', 'Unknown')}")
 
@@ -1553,14 +1557,15 @@ INSTRUCTIONS DE PERSONNALISATION :
             # Construire le contexte pour le persona
             analyst_report = self.shared_state.get('analyst_report', "Aucun rapport.")
 
-            # Ajouter le contexte web si disponible (désactivé pour le premier message)
+            # Récupération du contenu du site web si disponible
             web_context = ""
-            
-            # Récupérer le site web depuis les métadonnées enrichies
             target_website = self._get_target_website(target)
             
             if target_website:
                 self.logger.debug(f"🔍 Site web détecté pour {target.get('uid', 'Unknown')} : {target_website}")
+                self.logger.info(f"🌐 Récupération du contenu du site : {target_website}...")
+                web_context = self._fetch_website_content(target_website)
+                self.logger.info("✅ Contenu web récupéré.")
             else:
                 self.logger.debug(f"🔍 Pas de site web pour {target.get('uid', 'Unknown')}")
 
@@ -1682,14 +1687,12 @@ INSTRUCTIONS DE PERSONNALISATION :
             analyst_report = self.shared_state.get('analyst_report', "Aucun rapport.")
             final_prompt += f"\n\n--- RAPPORT DE L'ANALYSTE ---\n{analyst_report}"
 
-            # 4. Web-Search avec Perplexica pour enrichir le contexte
+            # 4. Récupération directe du contenu du site web
             if target.get('website'):
-                self.logger.info(f"🕵️  Recherche Perplexica sur le site : {target['website']}...")
-                search_query = f"Fais un résumé de l'activité du site {target['website']} et de son propriétaire {target.get('uid', '')} pour comprendre ses centres d'intérêt."
-
-                web_context = self._call_perplexica(search_query)
-                self.logger.info("✅ Contexte web obtenu.")
-                final_prompt += f"\n\n--- CONTEXTE DU WEB (via Perplexica) ---\n{web_context}"
+                self.logger.info(f"🌐 Récupération du contenu du site : {target['website']}...")
+                web_context = self._fetch_website_content(target['website'])
+                self.logger.info("✅ Contenu web récupéré.")
+                final_prompt += f"\n\n--- CONTENU DU SITE WEB ---\n{web_context}"
 
             # 5. Ajouter la cible spécifique pour la personnalisation
             final_prompt += f"\n\n--- CIBLE SPÉCIFIQUE ---\n{json.dumps(target, indent=2, ensure_ascii=False)}"
@@ -2681,3 +2684,84 @@ Réponds UNIQUEMENT avec le JSON valide, sans texte avant ou après."""
             self.logger.debug(f"⚠️ Erreur lors de la récupération du site web : {e}")
         
         return ""
+
+    def _fetch_website_content(self, url, max_length=2000):
+        """Récupère le contenu d'un site web et le convertit en markdown"""
+        try:
+            import requests
+            from bs4 import BeautifulSoup
+            import html2text
+            
+            self.logger.info(f"🌐 Récupération du contenu de : {url}")
+            
+            # Configuration des headers pour éviter d'être bloqué
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'fr,fr-FR;q=0.8,en-US;q=0.5,en;q=0.3',
+                'Accept-Encoding': 'gzip, deflate',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+            }
+            
+            # Récupération du contenu avec timeout
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            
+            # Parsing HTML avec BeautifulSoup
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # Suppression des éléments non désirés
+            for element in soup(['script', 'style', 'nav', 'footer', 'header', 'aside']):
+                element.decompose()
+            
+            # Extraction du contenu principal
+            content = ""
+            
+            # Essayer de trouver le contenu principal
+            main_selectors = ['main', 'article', '.content', '.main', '#content', '#main']
+            for selector in main_selectors:
+                main_content = soup.select_one(selector)
+                if main_content:
+                    content = main_content.get_text(separator=' ', strip=True)
+                    break
+            
+            # Si pas de contenu principal trouvé, prendre le body
+            if not content:
+                content = soup.get_text(separator=' ', strip=True)
+            
+            # Nettoyage du contenu
+            import re
+            # Supprimer les espaces multiples
+            content = re.sub(r'\s+', ' ', content)
+            # Supprimer les lignes vides
+            content = re.sub(r'\n\s*\n', '\n', content)
+            # Limiter la longueur
+            if len(content) > max_length:
+                content = content[:max_length] + "..."
+            
+            # Conversion en markdown basique
+            h = html2text.HTML2Text()
+            h.ignore_links = False
+            h.ignore_images = False
+            h.body_width = 0  # Pas de limite de largeur
+            
+            markdown_content = h.handle(str(soup))
+            
+            # Nettoyer le markdown
+            markdown_content = re.sub(r'\n\s*\n\s*\n', '\n\n', markdown_content)
+            if len(markdown_content) > max_length:
+                markdown_content = markdown_content[:max_length] + "..."
+            
+            self.logger.info(f"✅ Contenu récupéré : {len(markdown_content)} caractères")
+            return markdown_content
+            
+        except requests.exceptions.Timeout:
+            self.logger.warning(f"⚠️ Timeout lors de la récupération de {url}")
+            return f"Site web : {url} (timeout lors de la récupération)"
+        except requests.exceptions.RequestException as e:
+            self.logger.warning(f"⚠️ Erreur lors de la récupération de {url} : {e}")
+            return f"Site web : {url} (erreur de récupération)"
+        except Exception as e:
+            self.logger.warning(f"⚠️ Erreur lors du traitement de {url} : {e}")
+            return f"Site web : {url} (erreur de traitement)"

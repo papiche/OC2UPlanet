@@ -43,11 +43,12 @@ AstroBot v2.0 est un **système d'agents IA avancé** spécialisé dans la créa
 - **Statistiques détaillées** par campagne
 - **Suivi indépendant** de chaque campagne
 
-#### ⚡ **Optimisations Récentes du Code**
+#### **Optimisations Récentes du Code**
 - **Correction des incohérences** : Les modes correspondent maintenant exactement aux noms affichés
 - **Amélioration de la détection de langue** : Système plus robuste avec indicateurs multilingues
 - **Réduction de la duplication de code** : Méthode utilitaire `_get_target_website()` pour éviter la répétition
 - **Gestion d'erreurs améliorée** : Meilleure robustesse dans les appels API et la génération de messages
+- **🌐 Enrichissement web direct** : Remplacement de Perplexica par récupération directe du contenu des sites web
 
 ## 🏗️ Architecture des 3 Agents
 
@@ -547,6 +548,19 @@ L'équipe UPlanet
 - **Personas multilingues** : Créez du contenu spécifique pour chaque langue
 - **Détection automatique** : Le système détecte la langue depuis la base de connaissance
 - **Fallback intelligent** : Français par défaut si langue non détectée
+
+#### **🌐 Enrichissement Web Direct**
+- **Récupération automatique** : Le contenu des sites web est récupéré directement
+- **Conversion en markdown** : HTML converti automatiquement en format lisible
+- **Tous les modes** : Fonctionne dans Auto, Persona et Classique
+- **Performance optimisée** : Plus rapide que Perplexica, pas de coût externe
+
+#### **🔍 Tags de Recherche Perplexica**
+- **#search** : Recherche web prioritaire pour les prospects
+- **#info/#help** : Information contextuelle sur UPlanet
+- **#doc/#tutorial** : Documentation technique et guides
+- **Réponses automatiques** : Génération et envoi automatiques
+- **Personnalisation** : Adapté au profil et aux centres d'intérêt
 
 #### **📈 Suivi et Optimisation Continue**
 - **Analysez les réponses** : Adaptez vos personas selon les retours

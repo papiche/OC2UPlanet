@@ -4,21 +4,42 @@
 
 AstroBot v2.0 permet d'importer et d'utiliser automatiquement les prompts de campagne G1FabLab stockés dans le dossier `prompts/g1fablab/`. Cette fonctionnalité révolutionnaire transforme les messages pré-rédigés en campagnes marketing intelligentes et ultra-personnalisées grâce à l'analyse IA et au système de personas multilingues.
 
-## 📁 Structure des prompts G1FabLab
+## 📁 Prompts G1FabLab Disponibles
 
-Les prompts sont stockés dans le dossier `prompts/g1fablab/` avec la structure suivante :
+### **1. Écosystème Souverain - Construction Monde**
+**Fichier :** `1.Écosystème_Souverain_Construction_Monde.sh`
+- **Thème :** Présentation de l'écosystème UPlanet
+- **Cible :** Nouveaux prospects, introduction générale
+- **Message :** "La Ğ1, c'est fait. Et si on construisait le reste ?"
+- **Focus :** UPlanet, Astroport.ONE, MULTIPASS, vision globale
 
-```
-prompts/g1fablab/
-├── 1.sh  # "La Ğ1, c'est fait. Et si on construisait le reste ?"
-├── 2.sh  # "Activez les super-pouvoirs de votre compte Ğ1"
-├── 3.sh  # "Appel aux bâtisseurs : devenez Capitaine"
-└── 4.sh  # "Notre but ultime n'est pas le code. C'est la Terre."
-```
+### **2. Super Pouvoirs Compte G1 - MULTIPASS**
+**Fichier :** `2.Super_Pouvoirs_Compte_G1_MULTIPASS.sh`
+- **Thème :** Évolution du compte G1 vers MULTIPASS
+- **Cible :** Utilisateurs G1 existants
+- **Message :** "Activez les super-pouvoirs de votre compte Ğ1 en 2 minutes"
+- **Focus :** Transformation identité, revenus passifs, souveraineté
 
-Chaque fichier `.sh` contient :
-- `SUBJECT="..."` : Le sujet du message
-- `MESSAGE_BODY="..."` : Le corps du message avec placeholders `{PRENOM}`
+### **3. Appel Bâtisseurs - Capitaines Réseau UPlanet**
+**Fichier :** `3.Appel_Bâtisseurs_Capitaines_Réseau_UPlanet.sh`
+- **Thème :** Recrutement de Capitaines pour l'infrastructure
+- **Cible :** Techniciens, entrepreneurs, passionnés technique
+- **Message :** "Appel aux bâtisseurs : devenez Capitaine du réseau UPlanet"
+- **Focus :** Astroport.ONE, formation DRAGON, revenus, gouvernance
+
+### **4. But Ultime Terre - Régénération Écologique**
+**Fichier :** `4.But_Ultime_Terre_Régénération_Écologique.sh`
+- **Thème :** Mission écologique et régénération planétaire
+- **Cible :** Écologistes, investisseurs impact, militants
+- **Message :** "Notre but ultime n'est pas le code. C'est la Terre."
+- **Focus :** Forêts-jardins, SCIC, valeur numérique → actifs écologiques
+
+### **5. Assistant Intelligent Personnel UPlanet**
+**Fichier :** `5.Assistant_Intelligent_Personnel_UPlanet.sh`
+- **Thème :** Persona d'assistant intelligent et accompagnement
+- **Cible :** Support client, accompagnement personnalisé
+- **Message :** "Votre Assistant Intelligent Personnel UPlanet"
+- **Focus :** Personnalisation, support émotionnel, adaptation au profil
 
 ## 🚀 Comment utiliser les prompts G1FabLab v2.0
 

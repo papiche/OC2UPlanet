@@ -1,0 +1,11 @@
+# Dépendances pour AstroBot v2.0
+# Récupération de contenu web
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+html2text>=2020.1.16
+
+# Traitement de données
+json5>=0.9.14
+
+# Autres dépendances existantes
+# (ajouter ici les autres dépendances si nécessaire) 
