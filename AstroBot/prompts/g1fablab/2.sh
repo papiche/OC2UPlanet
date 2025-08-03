@@ -1,10 +1,11 @@
 SUBJECT="[G1FabLab] Activez les super-pouvoirs de votre compte Ğ1 en 2 minutes"
 
-MESSAGE_BODY="Salut {PRENOM},
+MESSAGE_BODY="Salut [PRENOM],
 
-Votre compte Ğ1 est plus puissant que vous ne le pensez. Il n'est pas seulement un portefeuille, c'est la clé qui peut déverrouiller votre pleine souveraineté numérique.
+Votre compte Ğ1 est plus puissant que vous ne le pensez. Il n'est pas seulement un portefeuille, 
+c'est la clé qui peut déverrouiller votre pleine souveraineté numérique.
 
-Avec le G1FabLab, vous pouvez dès aujourd'hui transformer votre identité Ğ1 en un **MULTIPASS UPlanet**.
+Avec le G1FabLab, vous pouvez dès aujourd'hui transformer votre identité Ğ1 en un **MULTIPASS UPlanet ORIGIN**.
 
 **Qu'est-ce que ça change ?**
 
@@ -19,7 +20,7 @@ C'est l'évolution naturelle de votre engagement. Le geste est simple, le change
 
 **Prêt à passer au niveau supérieur ?**
 Créez votre MULTIPASS avec votre compte gchange, c'est simple et sécurisé :
-➡️ **https://disco.multipass.quest**
+➡️ **https://u.copylaradio.com/g1**
 
 Rejoignez-nous sur le réseau où votre identité vous appartient vraiment.
 

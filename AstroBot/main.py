@@ -315,10 +315,10 @@ class AstroBotOrchestrator:
         
         print("🚀 INITIALISATION ET ANALYSE :")
         print(f"1. 🌍 Analyse Géo-Linguistique         ({lang_total} / {gps_prospects} profils avec GPS)")
-        print(f"2. 🏷️  Analyse par Thèmes (Compétences, etc.) ({tags_total} / {total} profils analysés)")
+        print(f"2. 🏷️ Analyse par Thèmes (Compétences, etc.) ({tags_total} / {total} profils analysés)")
         
         print("\n🔧 PERSONA - RAFFINAGE ET OPTIMISATION :")
-        print("3. 🎭 Créer Banques persona (5-9) selon les Thèmes détectés")
+        print("3. 🎭 Créer Banques persona (5-9) automatiquement selon les Thèmes détectés")
         print("4. 🌍 Ajouter Traductions Banque(s) persona (au choix, 1, 3, ou 0-3)")
         print("5. 🔄 Optimiser les Thèmes (recalculer le Top 50)")
         print("6. 🧪 Mode Test (cible unique pour validation)")

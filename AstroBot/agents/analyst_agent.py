@@ -1494,6 +1494,7 @@ Le persona doit être une synthèse créative des thèmes {', '.join(theme_group
         print("Sélectionnez les thèmes qui vous intéressent (numéros séparés par des virgules)")
         print("Exemple : 1,3,5 pour sélectionner les thèmes 1, 3 et 5")
         print("Entrée pour annuler")
+        print("r. Retour")
         print()
         
         # Analyser les thèmes disponibles
@@ -1511,9 +1512,12 @@ Le persona doit être une synthèse créative des thèmes {', '.join(theme_group
             print(f" {i:>2}. {theme:<20} ({count:>4} membres)")
         
         try:
-            choice = input("\nSélectionnez les thèmes (ex: 1,3,5) : ").strip()
+            choice = input("\nSélectionnez les thèmes (ex: 1,3,5) ou 'r' pour retour : ").strip()
             if not choice:
                 self.logger.info("Opération annulée.")
+                return
+            if choice.lower() == 'r':
+                self.logger.info("Retour au menu analyste...")
                 return
             
             selected_indices = [int(x.strip()) - 1 for x in choice.split(',')]
@@ -1560,11 +1564,15 @@ Le persona doit être une synthèse créative des thèmes {', '.join(theme_group
         print("3. Filtrer par pays")
         print("4. Filtrer par région")
         print("5. Combinaison de filtres")
+        print("r. Retour")
         
         try:
-            filter_choice = input("\nChoisissez une option (1-5) : ").strip()
+            filter_choice = input("\nChoisissez une option (1-5) ou 'r' pour retour : ").strip()
             
-            if filter_choice == "1":
+            if filter_choice.lower() == 'r':
+                self.logger.info("Retour à la sélection des thèmes...")
+                return
+            elif filter_choice == "1":
                 final_prospects = filtered_prospects
             elif filter_choice == "2":
                 final_prospects = self._filter_by_language(filtered_prospects)
@@ -1613,8 +1621,13 @@ Le persona doit être une synthèse créative des thèmes {', '.join(theme_group
             }.get(lang, lang.upper())
             print(f"{i}. {lang_name} ({count} prospects)")
         
+        print("r. Retour")
+        
         try:
-            choice = input("\nSélectionnez les langues (ex: 1,2) ou 'all' pour toutes : ").strip()
+            choice = input("\nSélectionnez les langues (ex: 1,2), 'all' pour toutes, ou 'r' pour retour : ").strip()
+            if choice.lower() == 'r':
+                self.logger.info("Retour aux options de filtrage...")
+                return prospects
             
             if choice.lower() == 'all':
                 selected_langs = [lang for lang, _ in lang_list]
@@ -1657,8 +1670,13 @@ Le persona doit être une synthèse créative des thèmes {', '.join(theme_group
         for i, (country, count) in enumerate(country_list, 1):
             print(f"{i}. {country} ({count} prospects)")
         
+        print("r. Retour")
+        
         try:
-            choice = input("\nSélectionnez les pays (ex: 1,2) ou 'all' pour tous : ").strip()
+            choice = input("\nSélectionnez les pays (ex: 1,2), 'all' pour tous, ou 'r' pour retour : ").strip()
+            if choice.lower() == 'r':
+                self.logger.info("Retour aux options de filtrage...")
+                return prospects
             
             if choice.lower() == 'all':
                 selected_countries = [country for country, _ in country_list]
@@ -1703,8 +1721,13 @@ Le persona doit être une synthèse créative des thèmes {', '.join(theme_group
         for i, (region, count) in enumerate(region_list, 1):
             print(f"{i}. {region} ({count} prospects)")
         
+        print("r. Retour")
+        
         try:
-            choice = input("\nSélectionnez les régions (ex: 1,2) ou 'all' pour toutes : ").strip()
+            choice = input("\nSélectionnez les régions (ex: 1,2), 'all' pour toutes, ou 'r' pour retour : ").strip()
+            if choice.lower() == 'r':
+                self.logger.info("Retour aux options de filtrage...")
+                return prospects
             
             if choice.lower() == 'all':
                 selected_regions = [region for region, _ in region_list]
@@ -2086,8 +2109,12 @@ Le persona doit être une synthèse créative des thèmes {', '.join(theme_group
         print("- '1' pour traduire la banque 1")
         print("- '3' pour traduire la banque 3") 
         print("- '0-3' pour traduire les banques 0, 1, 2, 3")
+        print("- 'r' pour retour")
         
         choice = input("> ").strip()
+        if choice.lower() == 'r':
+            self.logger.info("Retour au menu analyste...")
+            return
         
         # Parser le choix
         banks_to_translate = []

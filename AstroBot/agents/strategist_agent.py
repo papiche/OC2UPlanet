@@ -121,6 +121,15 @@ class StrategistAgent(Agent):
         # Choisir le mode de rédaction
         mode = self._choose_strategy_mode()
         
+        # Sélectionner le persona une seule fois pour toutes les cibles (sauf mode persona)
+        selected_bank = None
+        if mode == "classic":
+            # Mode Classique : Choix manuel du persona une seule fois
+            self.logger.info("📝 Mode Classique : Choix manuel du persona (une seule fois pour toutes les cibles)")
+            selected_bank = self._choose_bank_for_classic_method(banks_config)
+            if selected_bank:
+                self.logger.info(f"🎭 Persona sélectionné pour toutes les cibles : {selected_bank['name']}")
+        
         # Générer les messages personnalisés pour chaque cible
         personalized_messages = []
         
@@ -129,26 +138,26 @@ class StrategistAgent(Agent):
             
             if mode == "persona":
                 # Mode Persona : Analyse automatique du profil et sélection de persona
-                selected_bank = self._analyze_profile_and_select_bank([target], banks_config)
-                if selected_bank:
-                    self.logger.info(f"🎭 Mode Persona : Banque sélectionnée automatiquement : {selected_bank['name']}")
-                    message_content = self._generate_personalized_message_with_persona_mode(selected_bank, treasury_pubkey, target)
+                target_selected_bank = self._analyze_profile_and_select_bank([target], banks_config)
+                if target_selected_bank:
+                    self.logger.info(f"🎭 Mode Persona : Banque sélectionnée automatiquement : {target_selected_bank['name']}")
+                    message_content = self._generate_personalized_message_with_persona_mode(target_selected_bank, treasury_pubkey, target)
                 else:
                     self.logger.warning("⚠️ Mode Persona : Aucun persona adaptée trouvée, passage en mode classique")
-                    message_content = self._generate_personalized_message_with_classic_mode(banks_config, treasury_pubkey, target)
+                    message_content = self._generate_personalized_message_with_classic_mode(banks_config, treasury_pubkey, target, selected_bank)
             elif mode == "auto":
                 # Mode Auto : Utilisation de la logique existante
-                selected_bank = self._select_bank_for_targets([target], banks_config)
-                if selected_bank:
-                    self.logger.info(f"🎭 Mode Auto : Banque sélectionnée : {selected_bank['name']}")
-                    message_content = self._generate_personalized_message_with_bank_mode(selected_bank, target)
+                target_selected_bank = self._select_bank_for_targets([target], banks_config)
+                if target_selected_bank:
+                    self.logger.info(f"🎭 Mode Auto : Banque sélectionnée : {target_selected_bank['name']}")
+                    message_content = self._generate_personalized_message_with_bank_mode(target_selected_bank, target)
                 else:
                     self.logger.info("📝 Mode Auto : Aucun persona adaptée, passage en mode classique")
-                    message_content = self._generate_personalized_message_with_classic_mode(banks_config, treasury_pubkey, target)
+                    message_content = self._generate_personalized_message_with_classic_mode(banks_config, treasury_pubkey, target, selected_bank)
             else:
-                # Mode Classique : Choix manuel
-                self.logger.info("📝 Mode Classique : Choix manuel du persona")
-                message_content = self._generate_personalized_message_with_classic_mode(banks_config, treasury_pubkey, target)
+                # Mode Classique : Utiliser le persona déjà sélectionné
+                self.logger.info("📝 Mode Classique : Utilisation du persona sélectionné")
+                message_content = self._generate_personalized_message_with_classic_mode(banks_config, treasury_pubkey, target, selected_bank)
 
             if message_content and 'title' in message_content and 'text' in message_content:
                 personalized_messages.append({
@@ -211,22 +220,32 @@ class StrategistAgent(Agent):
 
     def _call_ia_for_writing(self, final_prompt, target_language='fr'):
         """Appelle l'IA pour la rédaction du message dans la langue spécifiée"""
-        # Ajouter l'instruction de langue au prompt
-        language_instruction = f"\n\nIMPORTANT : Écris le message en {target_language.upper()}."
-        if target_language == 'fr':
-            language_instruction = "\n\nIMPORTANT : Écris le message en français."
-        elif target_language == 'en':
-            language_instruction = "\n\nIMPORTANT : Write the message in English."
-        elif target_language == 'es':
-            language_instruction = "\n\nIMPORTANT : Escribe el mensaje en español."
-        elif target_language == 'de':
-            language_instruction = "\n\nIMPORTANT : Schreibe die Nachricht auf Deutsch."
-        elif target_language == 'it':
-            language_instruction = "\n\nIMPORTANT : Scrivi il messaggio in italiano."
-        elif target_language == 'pt':
-            language_instruction = "\n\nIMPORTANT : Escreva a mensagem em português."
+        # Vérifier si le prompt est déjà dans la langue cible
+        prompt_is_in_target_language = False
+        if target_language == 'en' and ('You are UPlanet' in final_prompt or 'Write the ENTIRE message in English' in final_prompt):
+            prompt_is_in_target_language = True
+        elif target_language == 'fr' and ('Tu es l\'Agent Stratège' in final_prompt or 'Écris le message' in final_prompt):
+            prompt_is_in_target_language = True
         
-        prompt_with_language = final_prompt + language_instruction
+        # Ajouter l'instruction de langue seulement si nécessaire
+        if not prompt_is_in_target_language:
+            language_instruction = f"\n\nIMPORTANT : Écris le message en {target_language.upper()}."
+            if target_language == 'fr':
+                language_instruction = "\n\nIMPORTANT : Écris le message en français."
+            elif target_language == 'en':
+                language_instruction = "\n\nIMPORTANT : Write the message in English."
+            elif target_language == 'es':
+                language_instruction = "\n\nIMPORTANT : Escribe el mensaje en español."
+            elif target_language == 'de':
+                language_instruction = "\n\nIMPORTANT : Schreibe die Nachricht auf Deutsch."
+            elif target_language == 'it':
+                language_instruction = "\n\nIMPORTANT : Scrivi il messaggio in italiano."
+            elif target_language == 'pt':
+                language_instruction = "\n\nIMPORTANT : Escreva a mensagem em português."
+            
+            prompt_with_language = final_prompt + language_instruction
+        else:
+            prompt_with_language = final_prompt
         
         question_script = self.shared_state['config']['question_script']
         command = ['python3', question_script, prompt_with_language]
@@ -266,7 +285,8 @@ class StrategistAgent(Agent):
                 print("4. Tester un persona (générer un message)")
                 print("5. Configurer les Liens")
                 print("6. Synchroniser les thèmes depuis l'Agent Analyste")
-                print("7. Terminé.")
+                print("7. 📥 Importer un prompt G1FabLab dans la banque 4")
+                print("8. Terminé.")
 
                 choice = input("\nVotre choix : ").strip()
 
@@ -283,6 +303,8 @@ class StrategistAgent(Agent):
                 elif choice == "6":
                     banks_config = self._sync_themes_from_analyst(banks_config)
                 elif choice == "7":
+                    banks_config = self._import_g1fablab_prompt(banks_config)
+                elif choice == "8":
                     self._save_banks_config(banks_config, banks_config_file)
                     self.logger.info("✅ Configuration des personas sauvegardée")
                     break
@@ -779,13 +801,20 @@ class StrategistAgent(Agent):
         print("-" * 40)
 
         # Afficher les personas disponibles
+        available_slots = []
         for slot in range(12):
             bank = banks_config['banks'].get(str(slot), {})
             if bank.get('name'):
                 print(f"{slot}. {bank['name']}")
+                available_slots.append(str(slot))
+
+        print("r. Retour")
 
         try:
-            slot = input("\nChoisissez le numéro du persona à tester : ").strip()
+            slot = input("\nChoisissez le numéro du persona à tester (ou 'r' pour retour) : ").strip()
+            if slot.lower() == 'r':
+                print("Retour au gestionnaire de banques...")
+                return
             if not (0 <= int(slot) <= 11):
                 print("❌ Numéro de persona invalide")
                 return
@@ -871,7 +900,7 @@ class StrategistAgent(Agent):
             bank_name = bank.get('name', '')
             bank_archetype = bank.get('archetype', '')
             self.logger.debug(f"🌍 Utilisation du contenu français (fallback)")
-
+        
         prompt = f"""Tu es l'Agent Stratège d'UPlanet. Tu dois rédiger un message de campagne personnalisé en adoptant la personnalité du persona de mémoire suivante :
 
 ARCHÉTYPE : {bank_archetype}
@@ -1202,13 +1231,22 @@ Exemple de format de sortie :
         print("ou continuer sans persona (méthode classique pure)")
         print()
         
-        # Afficher les personas disponibles
+        # Afficher les personas disponibles dans l'ordre normal
         available_banks = []
+        display_numbers = []
+        
+        # Parcourir les banques dans l'ordre (0, 1, 2, 3, 4, etc.)
         for slot in range(12):
             bank = banks_config['banks'].get(str(slot), {})
             if bank.get('name') and bank.get('corpus'):
                 available_banks.append((slot, bank))
-                print(f"{slot}. {bank['name']} ({bank.get('archetype', 'Non défini')})")
+                display_numbers.append(slot)
+                
+                # Ajouter l'icône 🎯 pour la banque 4 si elle a un prompt G1FabLab
+                if slot == 4 and bank.get('corpus', {}).get('g1fablab_prompt'):
+                    print(f"🎯 {slot}. {bank['name']} - PROMPT G1FabLab ({bank.get('archetype', 'Non défini')})")
+                else:
+                    print(f"{slot}. {bank['name']} ({bank.get('archetype', 'Non défini')})")
         
         if not available_banks:
             print("❌ Aucun persona configurée avec corpus")
@@ -1217,15 +1255,19 @@ Exemple de format de sortie :
         print(f"{len(available_banks)}. Aucun persona (méthode classique pure)")
         
         try:
-            choice = input(f"\nChoisissez un persona (0-{len(available_banks)-1}) ou {len(available_banks)} pour aucune : ").strip()
+            choice = input(f"\nChoisissez un persona ({', '.join(map(str, display_numbers))}) ou {len(available_banks)} pour aucune : ").strip()
             choice_int = int(choice)
             
             if choice_int == len(available_banks):
                 print("✅ Méthode classique pure sélectionnée")
                 return None
-            elif 0 <= choice_int < len(available_banks):
-                selected_slot, selected_bank = available_banks[choice_int]
+            elif choice_int in display_numbers:
+                # Trouver l'index dans available_banks
+                index = display_numbers.index(choice_int)
+                selected_slot, selected_bank = available_banks[index]
                 print(f"✅ Banque sélectionnée : {selected_bank['name']}")
+                if selected_slot == 4 and selected_bank.get('corpus', {}).get('g1fablab_prompt'):
+                    print("🎯 Utilisation du prompt G1FabLab importé")
                 return selected_bank
             else:
                 print("❌ Choix invalide, utilisation de la méthode classique pure")
@@ -1557,13 +1599,17 @@ INSTRUCTIONS DE PERSONNALISATION :
         """Génère un message en mode Auto avec le persona sélectionnée automatiquement (méthode legacy)"""
         return self._generate_personalized_message_with_bank_mode(selected_bank, self.shared_state['targets'][0])
 
-    def _generate_personalized_message_with_classic_mode(self, banks_config, treasury_pubkey, target):
+    def _generate_personalized_message_with_classic_mode(self, banks_config, treasury_pubkey, target, selected_bank=None):
         """Génère un message personnalisé en mode Classique pour une cible spécifique"""
         self.logger.info(f"📝 Mode Classique : Génération du message personnalisé pour {target.get('uid', 'Unknown')}")
         
         try:
-            # Proposer le choix d'un persona de contexte
-            selected_bank = self._choose_bank_for_classic_method(banks_config)
+            # Proposer le choix d'un persona de contexte seulement si pas déjà sélectionné
+            if selected_bank is None:
+                selected_bank = self._choose_bank_for_classic_method(banks_config)
+            
+            # Récupérer la langue du profil (doit être défini avant le bloc if)
+            target_language = self._get_target_language(target)
             
             # --- Construction du Prompt Final ---
             # 1. Charger le prompt de base
@@ -1574,12 +1620,25 @@ INSTRUCTIONS DE PERSONNALISATION :
             # Remplacer le placeholder du portefeuille Trésor
             final_prompt = final_prompt.replace('[UPLANET_TREASURY_G1PUB]', treasury_pubkey)
 
-            # 2. Ajouter le contexte du persona si sélectionnée
-            if selected_bank:
-                self.logger.info(f"🎭 Contexte du persona : {selected_bank['name']}")
+            # 2. Vérifier si c'est une banque G1FabLab et utiliser la fonction appropriée
+            if selected_bank and selected_bank.get('corpus', {}).get('g1fablab_prompt'):
+                # Utiliser directement la fonction G1FabLab
+                self.logger.info(f"🎯 Mode Classique : Utilisation du prompt G1FabLab pour {selected_bank['name']}")
                 
-                # Récupérer la langue du profil
-                target_language = self._get_target_language(target)
+                # Construire la description de la cible
+                target_description = f"Prospect : {target.get('uid', 'Unknown')}\n"
+                target_description += f"Langue : {target_language}\n"
+                if target.get('website'):
+                    target_description += f"Site web : {target['website']}\n"
+                if target.get('tags'):
+                    target_description += f"Thèmes : {', '.join(target['tags'])}\n"
+                
+                # Utiliser la fonction spécialisée G1FabLab
+                message_content = self._generate_message_with_bank(selected_bank, target_description, target_language)
+                return message_content
+            elif selected_bank:
+                # Utiliser l'approche classique avec contexte
+                self.logger.info(f"🎭 Contexte du persona : {selected_bank['name']}")
                 
                 # Utiliser le contenu multilingue si disponible
                 multilingual = selected_bank.get('multilingual', {})
@@ -1690,3 +1749,224 @@ INSTRUCTIONS DE PERSONNALISATION :
         except json.JSONDecodeError:
             self.logger.warning(f"Failed to parse AI JSON response. Cleaned string was: {clean_json_str}")
             return {"title": "Invitation UPlanet", "text": raw_response}
+
+    def _import_g1fablab_prompt(self, banks_config):
+        """Importe un prompt G1FabLab dans la banque 4 avec analyse IA automatique"""
+        print("\n📥 IMPORTATION D'UN PROMPT G1FabLab")
+        print("-" * 40)
+        
+        # Chemin vers le dossier g1fablab
+        g1fablab_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'prompts', 'g1fablab')
+        
+        if not os.path.exists(g1fablab_dir):
+            print(f"❌ Dossier G1FabLab non trouvé : {g1fablab_dir}")
+            return banks_config
+            
+        # Lister les fichiers .sh disponibles
+        g1fablab_files = []
+        for file in os.listdir(g1fablab_dir):
+            if file.endswith('.sh'):
+                g1fablab_files.append(file)
+        
+        if not g1fablab_files:
+            print("❌ Aucun fichier .sh trouvé dans le dossier G1FabLab")
+            return banks_config
+            
+        # Afficher les fichiers disponibles
+        print("📁 Fichiers G1FabLab disponibles :")
+        for i, file in enumerate(sorted(g1fablab_files), 1):
+            print(f"  {i}. {file}")
+        
+        print(f"\n💡 Sélectionnez un fichier (1-{len(g1fablab_files)}) ou 0 pour annuler")
+        
+        try:
+            choice = input("Votre choix : ").strip()
+            if choice == "0":
+                print("❌ Importation annulée")
+                return banks_config
+                
+            choice_idx = int(choice) - 1
+            if 0 <= choice_idx < len(g1fablab_files):
+                selected_file = sorted(g1fablab_files)[choice_idx]
+                file_path = os.path.join(g1fablab_dir, selected_file)
+                
+                # Lire le contenu du fichier
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                print(f"\n📄 Contenu du fichier {selected_file} :")
+                print("-" * 50)
+                print(content)
+                print("-" * 50)
+                
+                # Demander confirmation
+                confirm = input("\n✅ Voulez-vous importer ce prompt dans la banque 4 ? (o/n) : ").strip().lower()
+                if confirm in ['o', 'oui', 'y', 'yes']:
+                    # Extraire SUBJECT et MESSAGE_BODY
+                    subject_match = re.search(r'SUBJECT="([^"]*)"', content)
+                    message_match = re.search(r'MESSAGE_BODY="([^"]*)"', content, re.DOTALL)
+                    
+                    subject = subject_match.group(1) if subject_match else "Sujet non trouvé"
+                    message_body = message_match.group(1) if message_match else "Message non trouvé"
+                    
+                    print(f"\n🤖 Analyse IA du prompt en cours...")
+                    
+                    # Analyser le prompt avec l'IA pour compléter les champs
+                    bank_config = self._analyze_g1fablab_prompt_with_ai(subject, message_body, selected_file)
+                    
+                    # Créer ou mettre à jour la banque 4
+                    banks_config['banks']["4"] = bank_config
+                    
+                    self.logger.info(f"✅ Prompt G1FabLab {selected_file} analysé et importé avec succès dans la banque 4")
+                    print(f"✅ Prompt importé ! La banque 4 contient maintenant le prompt {selected_file}")
+                    print(f"🤖 Configuration générée par IA :")
+                    print(f"   📝 Nom : {bank_config['name']}")
+                    print(f"   🎭 Archétype : {bank_config['archetype']}")
+                    print(f"   🏷️ Thèmes : {', '.join(bank_config['themes'])}")
+                    print(f"   📚 Vocabulaire : {len(bank_config['corpus']['vocabulary'])} mots")
+                    print(f"   💬 Arguments : {len(bank_config['corpus']['arguments'])} arguments")
+                    
+                else:
+                    print("❌ Importation annulée")
+                    
+            else:
+                print("❌ Choix invalide")
+                
+        except (ValueError, IndexError):
+            print("❌ Choix invalide")
+        except Exception as e:
+            print(f"❌ Erreur lors de l'importation : {e}")
+            self.logger.error(f"Erreur lors de l'importation G1FabLab : {e}")
+
+        return banks_config
+
+    def _analyze_g1fablab_prompt_with_ai(self, subject, message_body, filename):
+        """Analyse un prompt G1FabLab avec l'IA pour générer la configuration complète de la banque"""
+        
+        prompt = f"""Tu es un expert en marketing et en analyse de contenu. Tu dois analyser un prompt de campagne G1FabLab et générer une configuration complète pour un persona de mémoire.
+
+PROMPT À ANALYSER :
+Fichier : {filename}
+Sujet : {subject}
+Message : {message_body}
+
+TÂCHE : Génère une configuration JSON complète pour un persona de mémoire avec les champs suivants :
+
+1. **name** : Un nom court et descriptif pour ce persona (ex: "Bâtisseur Souverain", "Militant Écologique")
+2. **description** : Une description claire du persona et de son rôle (2-3 phrases)
+3. **archetype** : L'archétype principal (ex: "Le Bâtisseur", "Le Militant", "Le Visionnaire", "L'Entrepreneur")
+4. **themes** : Liste de 6-8 thèmes clés extraits du message (ex: ["souverainete", "decentralisation", "monnaie-libre", "ecologie", "innovation", "communaute"])
+5. **corpus** : Un objet avec :
+   - **vocabulary** : 8-12 mots techniques spécifiques au domaine
+   - **arguments** : 3-4 arguments clés extraits du message
+   - **tone** : 3-4 adjectifs décrivant le ton de communication
+   - **g1fablab_prompt** : Les données originales du prompt
+
+IMPORTANT :
+- Analyse le ton, l'objectif et la cible du message
+- Identifie les thèmes principaux et les mots-clés
+- Détermine l'archétype le plus approprié
+- Génère un nom qui reflète l'essence du message
+
+Format de sortie : Ta réponse DOIT être un objet JSON valide avec la structure exacte demandée.
+
+Exemple de format :
+{{
+  "name": "Nom du Persona",
+  "description": "Description du persona...",
+  "archetype": "L'Archétype",
+  "themes": ["theme1", "theme2", "theme3"],
+  "corpus": {{
+    "vocabulary": ["mot1", "mot2", "mot3"],
+    "arguments": ["arg1", "arg2", "arg3"],
+    "tone": "ton1, ton2, ton3",
+    "examples": ["exemple1"],
+    "g1fablab_prompt": {{
+      "file": "{filename}",
+      "subject": "{subject}",
+      "message_body": "{message_body}"
+    }}
+  }}
+}}"""
+
+        try:
+            print("🧠 Interrogation de l'IA pour l'analyse du prompt...")
+            raw_response = self._call_ia_for_writing(prompt, 'fr')
+            
+            # Parser la réponse JSON
+            try:
+                # Nettoyer la réponse pour extraire le JSON
+                json_start = raw_response.find('{')
+                json_end = raw_response.rfind('}') + 1
+                if json_start != -1 and json_end != -1:
+                    json_str = raw_response[json_start:json_end]
+                    bank_config = json.loads(json_str)
+                    
+                    # Validation des champs requis
+                    required_fields = ['name', 'description', 'archetype', 'themes', 'corpus']
+                    corpus_fields = ['vocabulary', 'arguments', 'tone', 'examples', 'g1fablab_prompt']
+                    
+                    for field in required_fields:
+                        if field not in bank_config:
+                            raise ValueError(f"Champ manquant : {field}")
+                    
+                    for field in corpus_fields:
+                        if field not in bank_config['corpus']:
+                            raise ValueError(f"Champ corpus manquant : {field}")
+                    
+                    return bank_config
+                else:
+                    raise ValueError("JSON non trouvé dans la réponse")
+                    
+            except (json.JSONDecodeError, ValueError) as e:
+                self.logger.warning(f"Erreur parsing JSON IA : {e}")
+                print(f"⚠️ Erreur d'analyse IA, utilisation de la configuration par défaut")
+                
+                # Configuration par défaut en cas d'erreur
+                return {
+                    "name": f"G1FabLab - {filename}",
+                    "description": f"Persona basé sur le prompt G1FabLab {filename}",
+                    "archetype": "G1FabLab",
+                    "themes": ["g1fablab", "monnaie-libre", "souverainete", "decentralisation"],
+                    "corpus": {
+                        "vocabulary": ["G1FabLab", "Ğ1", "monnaie libre", "souveraineté", "décentralisation", "MULTIPASS", "UPlanet", "Astroport"],
+                        "arguments": [
+                            f"Campagne G1FabLab : {subject}",
+                            "Le G1FabLab travaille depuis 2018 à bâtir la suite logique de la Monnaie Libre",
+                            "Notre écosystème souverain pour nos données, nos échanges et nos projets"
+                        ],
+                        "tone": "engagé, visionnaire, technique, communautaire",
+                        "g1fablab_prompt": {
+                            "file": filename,
+                            "subject": subject,
+                            "message_body": message_body
+                        }
+                    }
+                }
+                
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"Erreur lors de l'analyse IA : {e}")
+            print(f"❌ Erreur lors de l'analyse IA : {e}")
+            
+            # Configuration par défaut en cas d'erreur
+            return {
+                "name": f"G1FabLab - {filename}",
+                "description": f"Persona basé sur le prompt G1FabLab {filename}",
+                "archetype": "G1FabLab",
+                "themes": ["g1fablab", "monnaie-libre", "souverainete", "decentralisation"],
+                "corpus": {
+                    "vocabulary": ["G1FabLab", "Ğ1", "monnaie libre", "souveraineté", "décentralisation", "MULTIPASS", "UPlanet", "Astroport"],
+                    "arguments": [
+                        f"Campagne G1FabLab : {subject}",
+                        "Le G1FabLab travaille depuis 2018 à bâtir la suite logique de la Monnaie Libre",
+                        "Notre écosystème souverain pour nos données, nos échanges et nos projets"
+                    ],
+                    "tone": "engagé, visionnaire, technique, communautaire",
+                    "g1fablab_prompt": {
+                        "file": filename,
+                        "subject": subject,
+                        "message_body": message_body
+                    }
+                }
+            }
