@@ -32,8 +32,8 @@ AstroBot v2.0 est un **système d'agents IA avancé** spécialisé dans la créa
 - **Liens contextuels** : OpenCollective, Discord, Documentation, GitHub, etc.
 
 #### 🎯 **Trois Modes de Rédaction Optimisés**
-- **Mode Persona** : Analyse IA automatique + sélection intelligente de banque
-- **Mode Auto** : Sélection automatique basée sur les thèmes + enrichissement web
+- **Mode Auto** : Analyse IA automatique + sélection intelligente de banque
+- **Mode Persona** : Sélection automatique basée sur les thèmes + enrichissement web
 - **Mode Classique** : Choix manuel avec injection de liens et personnalisation
 
 #### 📊 **Système de Slots de Campagnes (0-11)**
@@ -42,6 +42,12 @@ AstroBot v2.0 est un **système d'agents IA avancé** spécialisé dans la créa
 - **Nommage descriptif** : "MULTIPASS - FR, ES - France, Spain"
 - **Statistiques détaillées** par campagne
 - **Suivi indépendant** de chaque campagne
+
+#### ⚡ **Optimisations Récentes du Code**
+- **Correction des incohérences** : Les modes correspondent maintenant exactement aux noms affichés
+- **Amélioration de la détection de langue** : Système plus robuste avec indicateurs multilingues
+- **Réduction de la duplication de code** : Méthode utilitaire `_get_target_website()` pour éviter la répétition
+- **Gestion d'erreurs améliorée** : Meilleure robustesse dans les appels API et la génération de messages
 
 ## 🏗️ Architecture des 3 Agents
 
@@ -96,14 +102,14 @@ AstroBot v2.0 est un **système d'agents IA avancé** spécialisé dans la créa
 
 #### **Modes de Rédaction**
 
-##### **🎭 Mode Persona (Recommandé)**
+##### **🎭 Mode Auto (Recommandé pour Personnalisation Maximale)**
 - **Analyse IA** automatique du profil du prospect
 - **Enrichissement web** via Perplexica pour le contexte
 - **Sélection intelligente** de la banque la plus adaptée
 - **Scoring automatique** : Correspondance thèmes/archetype
 - **Personnalisation maximale** : Messages ultra-ciblés
 
-##### **🔄 Mode Auto**
+##### **🔄 Mode Persona (Recommandé pour Campagnes de Masse)**
 - **Sélection automatique** basée sur les thèmes des cibles
 - **Enrichissement contextuel** via Perplexica
 - **Personnalisation élevée** avec injection de liens
@@ -114,6 +120,14 @@ AstroBot v2.0 est un **système d'agents IA avancé** spécialisé dans la créa
 - **Injection automatique** de liens
 - **Personnalisation variable** selon la banque choisie
 - **Sélection unique** : Un persona pour toutes les cibles
+
+#### **Tableau Comparatif des Modes**
+
+| Mode | Personnalisation | Vitesse | Volume | Recommandation |
+|------|------------------|---------|--------|----------------|
+| **Auto** | ⭐⭐⭐⭐⭐ | ⭐⭐ | ⭐⭐ | Campagnes ultra-ciblées, prospects VIP |
+| **Persona** | ⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | Campagnes de masse, prospection large |
+| **Classique** | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | Tests, campagnes simples, débutants |
 
 ### 3. 📡 **Agent Opérateur** - Exécution et Suivi
 
@@ -424,45 +438,67 @@ Choisissez un persona (0-4) ou 5 pour aucune : 4
 
 ## 🎯 Stratégies de Campagnes Optimisées
 
-### **Campagne 1 : MULTIPASS pour Développeurs Francophones**
+### **Cas d'Usage 1 : Lancement MULTIPASS pour Développeurs**
+
+#### **Objectif** : Présenter MULTIPASS aux développeurs francophones
 ```bash
-# 1. Ciblage
-🎯 Ciblage Multi-Sélection : developpeur + crypto + technologie
+# 1. Ciblage Multi-Sélection
+🎯 Thèmes : developpeur + crypto + technologie
 🌍 Filtre : Langue française
 📊 Résultat : 1456 prospects
 
-# 2. Persona
-🎭 Mode Persona : Analyse automatique + sélection intelligente
-🏗️ Banque sélectionnée : Le Codeur Libre (L'Architecte Numérique)
+# 2. Configuration Persona
+🎭 Mode Auto (personnalisation maximale)
+🏗️ Banque sélectionnée automatiquement selon profil
 
-# 3. Canal
+# 3. Canal de Communication
 📡 Jaklis (Cesium+) : Messages privés personnalisés
 
-# 4. Résultat attendu
+# 4. Résultats Attendus
 📈 Taux de réponse : 25-30%
 🎯 Conversion : 15-20% vers OpenCollective
 ```
 
-### **Campagne 2 : Financement International**
+#### **Exemple de Message Généré**
+```
+Bonjour [Nom], 
+
+En tant que développeur passionné par les technologies décentralisées, 
+je pense que MULTIPASS pourrait vous intéresser. C'est une solution 
+d'identité souveraine basée sur NOSTR qui vous donne le contrôle total 
+de vos données.
+
+[Lien vers Documentation] pour les détails techniques
+[Lien vers GitHub] pour contribuer au développement
+
+Cordialement,
+L'équipe UPlanet
+```
+
+### **Cas d'Usage 2 : Campagne de Financement International**
+
+#### **Objectif** : Collecter des fonds via OpenCollective
 ```bash
-# 1. Ciblage
-🎯 Ciblage Multi-Sélection : open-source + blockchain
+# 1. Ciblage Multi-Sélection
+🎯 Thèmes : open-source + blockchain + monnaie-libre
 🌍 Filtre : Langue anglaise
 📊 Résultat : 567 prospects
 
-# 2. Persona
-🎭 Mode Auto : Sélection automatique basée sur les thèmes
-🏗️ Banque sélectionnée : The Free Coder (The Digital Architect)
+# 2. Configuration Persona
+🎭 Mode Persona (campagne de masse)
+🏗️ Banque : The Free Coder (The Digital Architect)
 
-# 3. Canal
+# 3. Canal de Communication
 📧 Mailjet : Campagne email professionnelle
 
-# 4. Résultat attendu
+# 4. Résultats Attendus
 📈 Taux d'ouverture : 35-40%
 🎯 Conversion : 10-15% vers OpenCollective
 ```
 
-### **Campagne 3 : G1FabLab - Écosystème Souverain**
+### **Cas d'Usage 3 : G1FabLab - Écosystème Souverain**
+
+#### **Objectif** : Présenter l'écosystème complet UPlanet
 ```bash
 # 1. Import G1FabLab
 📥 Import du prompt 1.sh dans la banque 4
@@ -473,14 +509,14 @@ Choisissez un persona (0-4) ou 5 pour aucune : 4
 🌍 Filtre : France + Espagne
 📊 Résultat : 234 prospects
 
-# 3. Persona
+# 3. Configuration Persona
 🎭 Mode Classique : Banque 4 (G1FabLab)
 🏗️ Persona : L'Architecte de Confiance
 
-# 4. Canal
+# 4. Canal de Communication
 📡 Jaklis + Nostr : Multicanal pour couverture maximale
 
-# 5. Résultat attendu
+# 5. Résultats Attendus
 📈 Taux de réponse : 30-35%
 🎯 Conversion : 20-25% vers OpenCollective
 ```
@@ -494,11 +530,28 @@ Choisissez un persona (0-4) ou 5 pour aucune : 4
 - **Qualité des réponses** : % de réponses positives
 - **Engagement** : % qui demandent plus d'informations
 
-### **Optimisation Continue**
-- **A/B Testing** : Comparer différents personas
-- **Analyse des réponses** : Adapter les messages selon les retours
-- **Optimisation des thèmes** : Nettoyer et consolider régulièrement
-- **Personas multilingues** : Améliorer le contenu culturel
+### **Bonnes Pratiques pour Optimiser vos Campagnes**
+
+#### **🎯 Avant de Lancer une Campagne**
+1. **Testez toujours en mode test** avec 1-2 cibles avant la campagne complète
+2. **Vérifiez vos personas** : Assurez-vous qu'ils sont bien configurés avec du contenu multilingue
+3. **Optimisez vos thèmes** : Lancez l'optimisation des thèmes si vous avez >1000 prospects
+4. **Importez un prompt G1FabLab** : Utilisez la banque 4 pour les campagnes spécialisées
+
+#### **🚀 Choix du Mode Optimal**
+- **Mode Auto** : Pour les prospects VIP ou les campagnes ultra-ciblées (< 100 prospects)
+- **Mode Persona** : Pour les campagnes de masse (100-1000 prospects)
+- **Mode Classique** : Pour les tests ou les campagnes simples
+
+#### **🌍 Optimisation Multilingue**
+- **Personas multilingues** : Créez du contenu spécifique pour chaque langue
+- **Détection automatique** : Le système détecte la langue depuis la base de connaissance
+- **Fallback intelligent** : Français par défaut si langue non détectée
+
+#### **📈 Suivi et Optimisation Continue**
+- **Analysez les réponses** : Adaptez vos personas selon les retours
+- **A/B Testing** : Testez différents personas sur de petits échantillons
+- **Nettoyage régulier** : Optimisez les thèmes tous les 3-6 mois
 
 ## 🔧 Configuration Avancée
 
@@ -540,6 +593,30 @@ Choisissez un persona (0-4) ou 5 pour aucune : 4
 
 ## 🚨 Dépannage et Support
 
+### **FAQ - Questions Fréquentes**
+
+#### **Q: Quel mode choisir pour ma première campagne ?**
+**R:** Commencez par le **Mode Classique** avec la banque 0 (Ingénieur/Technicien) pour tester le système. Une fois à l'aise, passez au **Mode Persona** pour les campagnes de masse.
+
+#### **Q: Comment optimiser mes taux de réponse ?**
+**R:** 
+- Utilisez le **Mode Auto** pour les prospects VIP
+- Testez différents personas avec de petits échantillons
+- Personnalisez vos personas avec du contenu multilingue
+- Optimisez régulièrement vos thèmes
+
+#### **Q: Pourquoi certains prospects n'ont pas de langue détectée ?**
+**R:** Le système utilise la base de connaissance enrichie. Lancez l'analyse géo-linguistique pour améliorer la détection. Le français est utilisé par défaut.
+
+#### **Q: Comment importer mes propres prompts G1FabLab ?**
+**R:** 
+1. Placez vos fichiers `.sh` dans `prompts/g1fablab/`
+2. Utilisez l'option "Import G1FabLab" dans la gestion des personas
+3. L'IA analysera automatiquement le contenu et créera un persona
+
+#### **Q: Puis-je utiliser plusieurs canaux simultanément ?**
+**R:** Oui ! L'Agent Opérateur permet d'envoyer via Jaklis, Mailjet et Nostr. Chaque canal a ses avantages selon votre cible.
+
 ### **Problèmes Courants**
 
 #### **1. Erreur "Script introuvable"**
@@ -569,6 +646,18 @@ cat ~/.zen/Astroport.ONE/tools/my.sh
 ```bash
 # Le système détecte automatiquement et propose l'analyse complète
 # Choisir 'o' quand proposé pour lancer l'analyse thématique complète
+```
+
+#### **5. Erreurs liées aux optimisations récentes**
+```bash
+# Si erreur "Mode non reconnu" après mise à jour
+# Vérifier que le code est à jour et redémarrer l'application
+
+# Si problème de détection de langue
+# Vérifier la base de connaissance : cat workspace/enriched_prospects.json | jq '.metadata.language'
+
+# Si erreur dans la récupération du site web
+# Vérifier les permissions : ls -la workspace/enriched_prospects.json
 ```
 
 ### **Logs et Debug**

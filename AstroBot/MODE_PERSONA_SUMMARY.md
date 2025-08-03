@@ -449,8 +449,335 @@ if target_region in bank.get('regions', []):
 }
 ```
 
-## ✅ Conclusion v2.0
+## 🌍 **Exemples Complets de Configuration Multilingue**
 
-Le **Mode Persona v2.0** transforme l'Agent Stratège en un outil de personnalisation intelligente ultra-avancé, permettant de créer des messages hautement personnalisés et engageants pour chaque prospect. Avec ses 12 banques de mémoire, ses personas multilingues, son import G1FabLab et son système de slots, il offre une solution complète pour créer des campagnes marketing au top.
+### **Exemple 1 : Persona Développeur Multilingue Complet**
 
-**🎭 Prêt pour les campagnes de prospection intelligentes v2.0 !** 🚀 
+```json
+{
+  "name": "Le Développeur Souverain",
+  "archetype": "L'Architecte Numérique",
+  "description": "Développeur passionné par la souveraineté numérique",
+  "themes": ["developpeur", "crypto", "open-source", "souverainete"],
+  "corpus": {
+    "tone": "pragmatique, précis, direct",
+    "vocabulary": ["protocole", "infrastructure", "décentralisation", "souveraineté"],
+    "arguments": [
+      "Le MULTIPASS est une implémentation NOSTR sécurisée",
+      "L'architecture Astroport est conçue pour la scalabilité",
+      "Le Ẑen offre une comptabilité on-chain transparente"
+    ],
+    "examples": [
+      "Notre objectif est de fournir une stack technique complète",
+      "Le code est auditable sur notre dépôt Git"
+    ]
+  },
+  "multilingual": {
+    "fr": {
+      "name": "Le Développeur Souverain",
+      "archetype": "L'Architecte Numérique",
+      "tone": "pragmatique, précis, direct",
+      "vocabulary": ["protocole", "infrastructure", "décentralisation", "souveraineté"],
+      "arguments": [
+        "Le MULTIPASS est une implémentation NOSTR sécurisée",
+        "L'architecture Astroport est conçue pour la scalabilité",
+        "Le Ẑen offre une comptabilité on-chain transparente"
+      ],
+      "examples": [
+        "Notre objectif est de fournir une stack technique complète",
+        "Le code est auditable sur notre dépôt Git"
+      ]
+    },
+    "en": {
+      "name": "The Sovereign Developer",
+      "archetype": "The Digital Architect",
+      "tone": "pragmatic, precise, direct",
+      "vocabulary": ["protocol", "infrastructure", "decentralization", "sovereignty"],
+      "arguments": [
+        "MULTIPASS is a secure NOSTR implementation",
+        "Astroport architecture is designed for scalability",
+        "Zen provides transparent on-chain accounting"
+      ],
+      "examples": [
+        "Our goal is to provide a complete technical stack",
+        "Code is auditable on our Git repository"
+      ]
+    },
+    "es": {
+      "name": "El Desarrollador Soberano",
+      "archetype": "El Arquitecto Digital",
+      "tone": "pragmático, preciso, directo",
+      "vocabulary": ["protocolo", "infraestructura", "descentralización", "soberanía"],
+      "arguments": [
+        "MULTIPASS es una implementación segura de NOSTR",
+        "La arquitectura Astroport está diseñada para escalabilidad",
+        "Zen proporciona contabilidad transparente on-chain"
+      ],
+      "examples": [
+        "Nuestro objetivo es proporcionar una stack técnica completa",
+        "El código es auditable en nuestro repositorio Git"
+      ]
+    },
+    "de": {
+      "name": "Der Souveräne Entwickler",
+      "archetype": "Der Digitale Architekt",
+      "tone": "pragmatisch, präzise, direkt",
+      "vocabulary": ["Protokoll", "Infrastruktur", "Dezentralisierung", "Souveränität"],
+      "arguments": [
+        "MULTIPASS ist eine sichere NOSTR-Implementierung",
+        "Astroport-Architektur ist für Skalierbarkeit konzipiert",
+        "Zen bietet transparente On-Chain-Buchhaltung"
+      ],
+      "examples": [
+        "Unser Ziel ist es, einen vollständigen technischen Stack bereitzustellen",
+        "Code ist in unserem Git-Repository überprüfbar"
+      ]
+    }
+  }
+}
+```
+
+### **Exemple 2 : Persona Créateur Multilingue Complet**
+
+```json
+{
+  "name": "L'Artisan Numérique",
+  "archetype": "Le Créateur",
+  "description": "Artisan passionné par la valorisation du savoir-faire",
+  "themes": ["creatif", "artisanat", "savoir-faire", "creation"],
+  "corpus": {
+    "tone": "concret, valorisant, pragmatique, passionné",
+    "vocabulary": ["création de valeur", "autonomie", "circuit-court", "juste rémunération"],
+    "arguments": [
+      "Notre écosystème vous fournit les outils pour vendre en direct",
+      "Le Ẑen permet de fixer un prix juste pour votre travail",
+      "UPlanet est votre atelier numérique personnel"
+    ],
+    "examples": [
+      "Votre talent a de la valeur. Notre système est conçu pour la reconnaître",
+      "Imaginez une place de marché où chaque artisan est co-propriétaire"
+    ]
+  },
+  "multilingual": {
+    "fr": {
+      "name": "L'Artisan Numérique",
+      "archetype": "Le Créateur",
+      "tone": "concret, valorisant, pragmatique, passionné",
+      "vocabulary": ["création de valeur", "autonomie", "circuit-court", "juste rémunération"],
+      "arguments": [
+        "Notre écosystème vous fournit les outils pour vendre en direct",
+        "Le Ẑen permet de fixer un prix juste pour votre travail",
+        "UPlanet est votre atelier numérique personnel"
+      ],
+      "examples": [
+        "Votre talent a de la valeur. Notre système est conçu pour la reconnaître",
+        "Imaginez une place de marché où chaque artisan est co-propriétaire"
+      ]
+    },
+    "en": {
+      "name": "The Digital Artisan",
+      "archetype": "The Creator",
+      "tone": "concrete, valuing, pragmatic, passionate",
+      "vocabulary": ["value creation", "autonomy", "short circuit", "fair remuneration"],
+      "arguments": [
+        "Our ecosystem provides you with tools to sell directly",
+        "Zen allows you to set a fair price for your work",
+        "UPlanet is your personal digital workshop"
+      ],
+      "examples": [
+        "Your talent has value. Our system is designed to recognize it",
+        "Imagine a marketplace where every artisan is a co-owner"
+      ]
+    },
+    "es": {
+      "name": "El Artesano Digital",
+      "archetype": "El Creador",
+      "tone": "concreto, valorizador, pragmático, apasionado",
+      "vocabulary": ["creación de valor", "autonomía", "circuito corto", "remuneración justa"],
+      "arguments": [
+        "Nuestro ecosistema te proporciona herramientas para vender directamente",
+        "Zen te permite establecer un precio justo por tu trabajo",
+        "UPlanet es tu taller digital personal"
+      ],
+      "examples": [
+        "Tu talento tiene valor. Nuestro sistema está diseñado para reconocerlo",
+        "Imagina un mercado donde cada artesano es copropietario"
+      ]
+    }
+  }
+}
+```
+
+### **Exemple 3 : Persona Militant Multilingue Complet**
+
+```json
+{
+  "name": "Le Militant Souverain",
+  "archetype": "Le Militant",
+  "description": "Militant engagé pour la souveraineté populaire",
+  "themes": ["souverainete", "transition", "ecologie", "collectif"],
+  "corpus": {
+    "tone": "inspirant, visionnaire, éthique",
+    "vocabulary": ["souveraineté populaire", "biens communs", "résilience", "alternative aux GAFAM"],
+    "arguments": [
+      "Nous bâtissons une alternative aux GAFAM où vos données sont un bien commun",
+      "Nous ne bâtissons pas un logiciel, nous construisons une société",
+      "Notre modèle coopératif garantit que les bénéfices sont réinvestis"
+    ],
+    "examples": [
+      "Rejoignez un mouvement qui transforme la valeur numérique en impact tangible",
+      "C'est une invitation à devenir co-propriétaire de notre futur numérique"
+    ]
+  },
+  "multilingual": {
+    "fr": {
+      "name": "Le Militant Souverain",
+      "archetype": "Le Militant",
+      "tone": "inspirant, visionnaire, éthique",
+      "vocabulary": ["souveraineté populaire", "biens communs", "résilience", "alternative aux GAFAM"],
+      "arguments": [
+        "Nous bâtissons une alternative aux GAFAM où vos données sont un bien commun",
+        "Nous ne bâtissons pas un logiciel, nous construisons une société",
+        "Notre modèle coopératif garantit que les bénéfices sont réinvestis"
+      ],
+      "examples": [
+        "Rejoignez un mouvement qui transforme la valeur numérique en impact tangible",
+        "C'est une invitation à devenir co-propriétaire de notre futur numérique"
+      ]
+    },
+    "en": {
+      "name": "The Sovereign Activist",
+      "archetype": "The Activist",
+      "tone": "inspiring, visionary, ethical",
+      "vocabulary": ["popular sovereignty", "commons", "resilience", "GAFAM alternative"],
+      "arguments": [
+        "We're building a GAFAM alternative where your data is a common good",
+        "We're not building software, we're building a society",
+        "Our cooperative model ensures profits are reinvested"
+      ],
+      "examples": [
+        "Join a movement that transforms digital value into tangible impact",
+        "This is an invitation to become co-owner of our digital future"
+      ]
+    },
+    "es": {
+      "name": "El Militante Soberano",
+      "archetype": "El Militante",
+      "tone": "inspirador, visionario, ético",
+      "vocabulary": ["soberanía popular", "bienes comunes", "resiliencia", "alternativa a GAFAM"],
+      "arguments": [
+        "Construimos una alternativa a GAFAM donde tus datos son un bien común",
+        "No construimos software, construimos una sociedad",
+        "Nuestro modelo cooperativo garantiza que los beneficios se reinvierten"
+      ],
+      "examples": [
+        "Únete a un movimiento que transforma el valor digital en impacto tangible",
+        "Es una invitación a ser copropietario de nuestro futuro digital"
+      ]
+    }
+  }
+}
+```
+
+## 🔧 **Guide de Configuration Multilingue**
+
+### **Étapes pour Créer un Persona Multilingue**
+
+#### **1. Configuration de Base**
+```bash
+# Menu → 4. Gérer les Mémoires Persona (0-9)
+# Option 1. Créer/Configurer un persona
+# Sélectionner une banque libre (ex: 5)
+```
+
+#### **2. Configuration du Contenu Français**
+```bash
+# Nom : Le Développeur Souverain
+# Archétype : L'Architecte Numérique
+# Description : Développeur passionné par la souveraineté numérique
+# Thèmes : developpeur, crypto, open-source, souverainete
+```
+
+#### **3. Remplissage du Corpus Français**
+```bash
+# Vocabulaire : protocole, infrastructure, décentralisation, souveraineté
+# Arguments : 
+# - Le MULTIPASS est une implémentation NOSTR sécurisée
+# - L'architecture Astroport est conçue pour la scalabilité
+# - Le Ẑen offre une comptabilité on-chain transparente
+# Ton : pragmatique, précis, direct
+# Exemples :
+# - Notre objectif est de fournir une stack technique complète
+# - Le code est auditable sur notre dépôt Git
+```
+
+#### **4. Génération Automatique du Contenu Multilingue**
+```bash
+# Menu → 4. Gérer les Mémoires Persona (0-9)
+# Option 6. Traduire un persona
+# Sélectionner la banque 5
+# Choisir les langues : en, es, de, it, pt
+# L'IA génère automatiquement le contenu multilingue
+```
+
+### **Bonnes Pratiques pour la Configuration Multilingue**
+
+#### **🎯 Adaptation Culturelle**
+- **Français** : Ton formel et précis, vocabulaire technique
+- **Anglais** : Ton direct et professionnel, vocabulaire international
+- **Espagnol** : Ton chaleureux et engageant, vocabulaire accessible
+- **Allemand** : Ton structuré et détaillé, vocabulaire technique précis
+
+#### **🌍 Vocabulaire Adapté**
+- **Éviter les traductions littérales** : Adapter le vocabulaire au contexte culturel
+- **Utiliser des termes techniques appropriés** : Chaque langue a ses conventions
+- **Respecter les nuances culturelles** : Ton et style adaptés à chaque culture
+
+#### **📝 Exemples de Messages Générés**
+
+**Français :**
+```
+Bonjour [Nom],
+
+En tant que développeur passionné par les technologies décentralisées, 
+je pense que MULTIPASS pourrait vous intéresser. C'est une solution 
+d'identité souveraine basée sur NOSTR qui vous donne le contrôle total 
+de vos données.
+
+[Lien vers Documentation] pour les détails techniques
+[Lien vers GitHub] pour contribuer au développement
+
+Cordialement,
+L'équipe UPlanet
+```
+
+**English :**
+```
+Hello [Name],
+
+As a developer passionate about decentralized technologies, 
+I think MULTIPASS might interest you. It's a sovereign identity 
+solution based on NOSTR that gives you complete control over 
+your data.
+
+[Link to Documentation] for technical details
+[Link to GitHub] to contribute to development
+
+Best regards,
+The UPlanet Team
+```
+
+**Español :**
+```
+Hola [Nombre],
+
+Como desarrollador apasionado por las tecnologías descentralizadas, 
+creo que MULTIPASS podría interesarte. Es una solución de identidad 
+soberana basada en NOSTR que te da control total sobre tus datos.
+
+[Enlace a Documentación] para detalles técnicos
+[Enlace a GitHub] para contribuir al desarrollo
+
+Saludos cordiales,
+El Equipo UPlanet
+``` 
