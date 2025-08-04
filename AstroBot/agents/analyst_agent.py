@@ -8,6 +8,7 @@ import time
 from collections import defaultdict, Counter
 import unicodedata
 from itertools import combinations
+import hashlib
 
 class AnalystAgent(Agent):
     """
@@ -76,23 +77,66 @@ class AnalystAgent(Agent):
 
             source_prospects_count = 0
             new_prospects_count = 0
+            updated_prospects_count = 0
+            
+            # Statistiques des nouvelles données
+            g1_prospects = 0
+            gchange_prospects = 0
+            linked_accounts_count = 0
+            
             for member in source_data.get('members', []):
                 pubkey = member.get("pubkey")
                 if not pubkey: continue
                 source_prospects_count += 1
 
+                # Compter les types de sources
+                source_type = member.get('source', '')
+                if 'g1_wot' in source_type:
+                    g1_prospects += 1
+                elif 'gchange' in source_type:
+                    gchange_prospects += 1
+
                 if pubkey not in knowledge_base:
+                    # Nouveau prospect
                     knowledge_base[pubkey] = {
                         "uid": member.get("uid"),
                         "profile": member.get('profile', {}),
                         "source": member.get('source'),
-                        "metadata": {} 
+                        "metadata": {},
+                        # Ajouter les nouvelles données si présentes
+                        "import_metadata": member.get('import_metadata', {}),
+                        "linked_accounts": member.get('linked_accounts', {})
                     }
                     new_prospects_count += 1
+                    
+                    # Compter les comptes liés
+                    if member.get('linked_accounts'):
+                        linked_accounts_count += 1
                 else: 
-                    knowledge_base[pubkey]['profile'] = member.get('profile', {})
+                    # Prospect existant - mettre à jour les données
+                    existing = knowledge_base[pubkey]
+                    existing['profile'] = member.get('profile', {})
+                    
+                    # Mettre à jour les métadonnées d'import si plus récentes
+                    new_import_metadata = member.get('import_metadata', {})
+                    if new_import_metadata:
+                        existing_import_metadata = existing.get('import_metadata', {})
+                        existing['import_metadata'] = {**existing_import_metadata, **new_import_metadata}
+                    
+                    # Mettre à jour les comptes liés
+                    new_linked_accounts = member.get('linked_accounts', {})
+                    if new_linked_accounts:
+                        existing_linked_accounts = existing.get('linked_accounts', {})
+                        existing['linked_accounts'] = {**existing_linked_accounts, **new_linked_accounts}
+                        if not existing.get('linked_accounts_counted'):
+                            linked_accounts_count += 1
+                            existing['linked_accounts_counted'] = True
+                    
+                    updated_prospects_count += 1
 
-            self.logger.info(f"Synchronisation terminée : {source_prospects_count} profils dans la source, {new_prospects_count} nouveaux ajoutés.")
+            self.logger.info(f"Synchronisation terminée : {source_prospects_count} profils dans la source, {new_prospects_count} nouveaux ajoutés, {updated_prospects_count} mis à jour.")
+            self.logger.info(f"📊 Composition : {g1_prospects} G1, {gchange_prospects} Gchange, {linked_accounts_count} avec comptes liés")
+            
         except Exception as e:
             self.logger.error(f"Erreur lors de la synchronisation avec '{prospect_file}': {e}", exc_info=True)
             
@@ -108,6 +152,146 @@ class AnalystAgent(Agent):
         except IOError as e:
             self.logger.error(f"Impossible de sauvegarder la base de connaissance : {e}")
 
+    def display_enhanced_statistics(self):
+        """
+        Affiche des statistiques détaillées sur la base de connaissance enrichie,
+        incluant les nouvelles données (import_metadata, linked_accounts).
+        """
+        self.logger.info("📊 Agent Analyste : Affichage des statistiques enrichies...")
+        
+        knowledge_base = self._load_and_sync_knowledge_base()
+        if not knowledge_base:
+            self.logger.error("❌ Base de connaissance vide.")
+            return
+        
+        total_prospects = len(knowledge_base)
+        
+        # Statistiques de base
+        g1_prospects = 0
+        gchange_prospects = 0
+        linked_accounts_count = 0
+        
+        # Statistiques d'import
+        import_sources = {}
+        discovery_methods = {}
+        
+        # Statistiques des comptes liés
+        cesium_linked = 0
+        gchange_linked = 0
+        
+        # Statistiques géographiques
+        languages = {}
+        countries = {}
+        regions = {}
+        
+        for pk, data in knowledge_base.items():
+            # Sources
+            source = data.get('source', '')
+            if 'g1_wot' in source:
+                g1_prospects += 1
+            elif 'gchange' in source:
+                gchange_prospects += 1
+            
+            # Comptes liés
+            linked_accounts = data.get('linked_accounts', {})
+            if linked_accounts:
+                linked_accounts_count += 1
+                if linked_accounts.get('cesium_pubkey'):
+                    cesium_linked += 1
+                if linked_accounts.get('gchange_uid'):
+                    gchange_linked += 1
+            
+            # Métadonnées d'import
+            import_metadata = data.get('import_metadata', {})
+            if import_metadata:
+                source_script = import_metadata.get('source_script')
+                if source_script:
+                    import_sources[source_script] = import_sources.get(source_script, 0) + 1
+                
+                discovery_method = import_metadata.get('discovery_method')
+                if discovery_method:
+                    discovery_methods[discovery_method] = discovery_methods.get(discovery_method, 0) + 1
+            
+            # Données géographiques
+            metadata = data.get('metadata', {})
+            lang = metadata.get('language', 'xx')
+            if lang != 'xx':
+                languages[lang] = languages.get(lang, 0) + 1
+            
+            country = metadata.get('country')
+            if country:
+                countries[country] = countries.get(country, 0) + 1
+            
+            region = metadata.get('region')
+            if region:
+                regions[region] = regions.get(region, 0) + 1
+        
+        # Affichage des statistiques
+        print("\n" + "="*60)
+        print("📊 STATISTIQUES ENRICHIES DE LA BASE DE CONNAISSANCE")
+        print("="*60)
+        
+        print(f"\n🎯 PROSPECTS ({total_prospects} total)")
+        print(f"   • G1 (WoT) : {g1_prospects}")
+        print(f"   • Gchange : {gchange_prospects}")
+        print(f"   • Autres : {total_prospects - g1_prospects - gchange_prospects}")
+        
+        print(f"\n🔗 COMPTES LIÉS ({linked_accounts_count} total)")
+        print(f"   • Avec Cesium : {cesium_linked}")
+        print(f"   • Avec Gchange : {gchange_linked}")
+        
+        print(f"\n📥 SOURCES D'IMPORT")
+        for source, count in sorted(import_sources.items(), key=lambda x: x[1], reverse=True):
+            print(f"   • {source} : {count}")
+        
+        print(f"\n🔍 MÉTHODES DE DÉCOUVERTE")
+        for method, count in sorted(discovery_methods.items(), key=lambda x: x[1], reverse=True):
+            print(f"   • {method} : {count}")
+        
+        print(f"\n🌍 RÉPARTITION GÉOGRAPHIQUE")
+        if languages:
+            print("   Langues principales :")
+            for lang, count in sorted(languages.items(), key=lambda x: x[1], reverse=True)[:5]:
+                lang_name = {'fr': 'Français', 'en': 'Anglais', 'es': 'Espagnol', 'de': 'Allemand', 'it': 'Italien'}.get(lang, lang.upper())
+                print(f"     • {lang_name} : {count}")
+        
+        if countries:
+            print("   Pays principaux :")
+            for country, count in sorted(countries.items(), key=lambda x: x[1], reverse=True)[:5]:
+                print(f"     • {country} : {count}")
+        
+        if regions:
+            print("   Régions principales :")
+            for region, count in sorted(regions.items(), key=lambda x: x[1], reverse=True)[:5]:
+                print(f"     • {region} : {count}")
+        
+        print("\n" + "="*60)
+        
+        # Afficher quelques exemples de comptes liés
+        print(f"\n🔗 EXEMPLES DE COMPTES LIÉS")
+        examples_shown = 0
+        for pk, data in knowledge_base.items():
+            if examples_shown >= 5:
+                break
+            linked_accounts = data.get('linked_accounts', {})
+            if linked_accounts:
+                uid = data.get('uid', 'N/A')
+                cesium_pk = linked_accounts.get('cesium_pubkey', '')
+                gchange_uid = linked_accounts.get('gchange_uid', '')
+                
+                if cesium_pk or gchange_uid:
+                    print(f"   • {uid}")
+                    if cesium_pk:
+                        print(f"     → Cesium : {cesium_pk[:20]}...")
+                    if gchange_uid:
+                        print(f"     → Gchange : {gchange_uid}")
+                    examples_shown += 1
+        
+        if examples_shown == 0:
+            print("   Aucun compte lié trouvé")
+        
+        print("\n" + "="*60)
+
     def get_analysis_progress(self):
         """
         Calcule et retourne l'état d'avancement de l'enrichissement
@@ -120,6 +304,11 @@ class AnalystAgent(Agent):
         tags_analyzed = 0
         web2_analyzed = 0
         gps_prospects = 0
+        
+        # Nouvelles statistiques
+        linked_accounts_count = 0
+        import_sources = {}
+        discovery_methods = {}
         
         for pk, data in knowledge_base.items():
             metadata = data.get('metadata', {})
@@ -140,13 +329,31 @@ class AnalystAgent(Agent):
                     lon = geo_point.get('lon')
                     if lat is not None and lon is not None and lat != 0 and lon != 0:
                         gps_prospects += 1
+            
+            # Analyser les nouvelles données
+            linked_accounts = data.get('linked_accounts', {})
+            if linked_accounts:
+                linked_accounts_count += 1
+            
+            import_metadata = data.get('import_metadata', {})
+            if import_metadata:
+                source_script = import_metadata.get('source_script')
+                if source_script:
+                    import_sources[source_script] = import_sources.get(source_script, 0) + 1
+                
+                discovery_method = import_metadata.get('discovery_method')
+                if discovery_method:
+                    discovery_methods[discovery_method] = discovery_methods.get(discovery_method, 0) + 1
                 
         return {
             "total": total_prospects,
             "language": language_analyzed,
             "tags": tags_analyzed,
             "web2": web2_analyzed,
-            "gps_prospects": gps_prospects
+            "gps_prospects": gps_prospects,
+            "linked_accounts": linked_accounts_count,
+            "import_sources": import_sources,
+            "discovery_methods": discovery_methods
         }
 
     def run_geo_linguistic_analysis(self):
@@ -155,9 +362,10 @@ class AnalystAgent(Agent):
         et sauvegarde ces données dans la base de connaissance.
         Utilise d'abord un service de géolocalisation pour les coordonnées GPS,
         puis l'IA en dernier recours pour l'analyse textuelle.
+        OPTIMISÉ : Cache géolocalisation + Batch processing + GPS prioritaire
         """
-        self.logger.info("🤖 Agent Analyste : Démarrage de l'analyse Géo-Linguistique optimisée...")
-        self.shared_state['status']['AnalystAgent'] = "Analyse Géo-Linguistique en cours..."
+        self.logger.info("🤖 Agent Analyste : Démarrage de l'analyse Géo-Linguistique OPTIMISÉE...")
+        self.shared_state['status']['AnalystAgent'] = "Analyse Géo-Linguistique optimisée en cours..."
 
         knowledge_base = self._load_and_sync_knowledge_base()
         prospects_to_analyze = [pk for pk, data in knowledge_base.items() if 'g1_wot' in data.get('source', '')]
@@ -165,86 +373,86 @@ class AnalystAgent(Agent):
         geo_prompt_template = self._load_prompt('analyst_language_prompt_file')
         if not geo_prompt_template: return
 
-        needs_analysis_count = 0
-        save_interval = 50
+        # --- OPTIMISATION 1 : Cache de géolocalisation ---
+        geo_cache_file = os.path.join(self.shared_state['config']['workspace'], 'geo_cache.json')
+        geo_cache = self._load_geo_cache(geo_cache_file)
         
         # Statistiques de traitement
         gps_geolocated = 0
+        gps_cached = 0
         ia_analyzed = 0
         skipped = 0
         
-        # Limite pour éviter de surcharger Nominatim (max 10000 requêtes GPS par session)
-        gps_requests_made = 0
-                
+        # --- PHASE 1 : Traitement GPS en priorité ---
+        self.logger.info("📍 PHASE 1 : Traitement GPS en priorité...")
+        
+        # Identifier tous les prospects avec GPS
+        prospects_with_gps = []
         for i, pubkey in enumerate(prospects_to_analyze):
             prospect_data = knowledge_base[pubkey]
             
             if 'language' in prospect_data.get('metadata', {}):
                 continue
-            
-            needs_analysis_count += 1
+                
             profile = prospect_data.get('profile', {})
             source = profile.get('_source', {})
-            description = (source.get('description') or '').strip()
             geo_point = source.get('geoPoint', {})
-
-            # Étape 1 : Vérifier si on a des coordonnées GPS ET si on n'a pas dépassé la limite
+            
             if (geo_point and 'lat' in geo_point and 'lon' in geo_point):
                 lat = geo_point.get('lat')
                 lon = geo_point.get('lon')
                 
                 if lat is not None and lon is not None and lat != 0 and lon != 0:
-                    gps_requests_made += 1
-                    self.logger.info(f"📍 Géolocalisation GPS {gps_requests_made} : {needs_analysis_count}/{len(prospects_to_analyze)} : {prospect_data.get('uid', 'N/A')}")
-                    
-                    # Utiliser le service de géolocalisation
-                    geo_data = self._geolocate_from_coordinates(lat, lon)
-                    
-                    if geo_data:
-                        meta = prospect_data.setdefault('metadata', {})
-                        
-                        # Ne pas écrire les champs si les valeurs sont inconnues
-                        language = geo_data.get('language', 'xx')
-                        if language != 'xx':
-                            meta['language'] = language
-                        
-                        country = geo_data.get('country')
-                        if country:
-                            meta['country'] = country
-                        
-                        region = geo_data.get('region')
-                        if region:
-                            meta['region'] = region
-                        
-                        city = geo_data.get('city')
-                        if city:
-                            meta['city'] = city
-                        
-                        meta['geolocation_source'] = 'gps_service'
-                        
-                        gps_geolocated += 1
-                        self.logger.debug(f"✅ Géolocalisé via GPS : {geo_data.get('country', 'N/A')} - {geo_data.get('region', 'N/A')}")
-                        
-                        if needs_analysis_count > 0 and needs_analysis_count % save_interval == 0:
-                            self.logger.info(f"--- Sauvegarde intermédiaire ({needs_analysis_count} profils analysés)... ---")
-                            self._save_knowledge_base(knowledge_base)
-                        continue
-                    else:
-                        self.logger.debug(f"⚠️ Échec géolocalisation GPS pour {prospect_data.get('uid', 'N/A')}")
+                    prospects_with_gps.append({
+                        'pubkey': pubkey,
+                        'lat': lat,
+                        'lon': lon,
+                        'uid': prospect_data.get('uid', 'N/A'),
+                        'cache_key': f"{lat:.4f},{lon:.4f}"
+                    })
+        
+        self.logger.info(f"📍 {len(prospects_with_gps)} prospects avec GPS identifiés")
+        
+        # Traiter les GPS par batch
+        batch_size = 15
+        max_gps_requests = min(5000, len(prospects_with_gps))
+        gps_requests_made = 0
+        
+        for i in range(0, len(prospects_with_gps), batch_size):
+            batch = prospects_with_gps[i:i+batch_size]
             
-            # Étape 2 : Si pas de GPS, ou géolocalisation échouée, essayer l'analyse textuelle
-            if description:
-                self.logger.info(f"🧠 Analyse IA {needs_analysis_count}/{len(prospects_to_analyze)} : {prospect_data.get('uid', 'N/A')}")
-                prompt = f"{geo_prompt_template}\n\nTexte fourni: \"{description}\""
-                
-                try:
-                    ia_response = self._query_ia(prompt, expect_json=True)
-                    cleaned_answer = self._clean_ia_json_output(ia_response['answer'])
-                    geo_data = json.loads(cleaned_answer)
+            for item in batch:
+                if gps_requests_made >= max_gps_requests:
+                    self.logger.info(f"⚠️ Limite GPS atteinte ({max_gps_requests} requêtes)")
+                    break
                     
+                # Vérifier le cache
+                if item['cache_key'] in geo_cache:
+                    geo_data = geo_cache[item['cache_key']]
+                    gps_cached += 1
+                    self.logger.debug(f"📍 Cache GPS hit : {item['uid']}")
+                else:
+                    # Géolocaliser
+                    try:
+                        time.sleep(random.uniform(1.0, 1.2))  # Respecter les limites Nominatim
+                        geo_data = self._geolocate_from_coordinates(item['lat'], item['lon'])
+                        
+                        if geo_data:
+                            geo_cache[item['cache_key']] = geo_data
+                            gps_geolocated += 1
+                            gps_requests_made += 1
+                            self.logger.info(f"📍 GPS {gps_requests_made}/{max_gps_requests} : {item['uid']} -> {geo_data.get('country', 'N/A')}")
+                        else:
+                            self.logger.debug(f"⚠️ Échec géolocalisation GPS pour {item['uid']}")
+                    except Exception as e:
+                        self.logger.warning(f"⚠️ Erreur GPS pour {item['uid']} : {e}")
+                
+                # Appliquer les données géolocalisées
+                if item['cache_key'] in geo_cache:
+                    geo_data = geo_cache[item['cache_key']]
+                    prospect_data = knowledge_base[item['pubkey']]
                     meta = prospect_data.setdefault('metadata', {})
                     
-                    # Ne pas écrire les champs si les valeurs sont inconnues
                     language = geo_data.get('language', 'xx')
                     if language != 'xx':
                         meta['language'] = language
@@ -257,46 +465,137 @@ class AnalystAgent(Agent):
                     if region:
                         meta['region'] = region
                     
-                    meta['geolocation_source'] = 'ia_analysis'
+                    city = geo_data.get('city')
+                    if city:
+                        meta['city'] = city
                     
-                    ia_analyzed += 1
-                    
-                    if needs_analysis_count > 0 and needs_analysis_count % save_interval == 0:
-                        self.logger.info(f"--- Sauvegarde intermédiaire ({needs_analysis_count} profils analysés)... ---")
-                        self._save_knowledge_base(knowledge_base)
-                except Exception as e:
-                    self.logger.error(f"Impossible de géo-classifier le profil {prospect_data.get('uid')} : {e}")
-                    # En cas d'erreur, ne pas écrire de métadonnées vides
-                    skipped += 1
-
-        self.logger.info(f"✅ Analyse Géo-Linguistique terminée.")
-        self.logger.info(f"📊 Statistiques :")
-        self.logger.info(f"   • Géolocalisés via GPS : {gps_geolocated}")
-        self.logger.info(f"   • Analysés via IA : {ia_analyzed}")
-        self.logger.info(f"   • Passés (pas de données) : {skipped}")
-        self.logger.info(f"   • Total traités : {needs_analysis_count}")
+                    meta['geolocation_source'] = 'gps_service'
+            
+            # Sauvegarder le cache après chaque batch
+            self._save_geo_cache(geo_cache, geo_cache_file)
+            
+            if gps_requests_made >= max_gps_requests:
+                break
         
+        # --- PHASE 2 : Analyse IA pour les cas restants ---
+        self.logger.info("🧠 PHASE 2 : Analyse IA pour cas restants...")
+        
+        prospects_needing_ia = []
+        for pubkey in prospects_to_analyze:
+            prospect_data = knowledge_base[pubkey]
+            
+            if 'language' in prospect_data.get('metadata', {}):
+                continue
+            
+            profile = prospect_data.get('profile', {})
+            source = profile.get('_source', {})
+            description = (source.get('description') or '').strip()
+            
+            if description:
+                prospects_needing_ia.append({
+                    'pubkey': pubkey,
+                    'description': description,
+                    'uid': prospect_data.get('uid', 'N/A')
+                })
+        
+        self.logger.info(f"🧠 {len(prospects_needing_ia)} prospects nécessitent une analyse IA")
+        
+        # Traiter l'IA séquentiellement (pas de parallélisation pour Ollama)
+        for i, item in enumerate(prospects_needing_ia):
+            try:
+                self.logger.info(f"🧠 Analyse IA {i+1}/{len(prospects_needing_ia)} : {item['uid']}")
+                prompt = f"{geo_prompt_template}\n\nTexte fourni: \"{item['description']}\""
+                
+                ia_response = self._query_ia(prompt, expect_json=True)
+                cleaned_answer = self._clean_ia_json_output(ia_response['answer'])
+                geo_data = json.loads(cleaned_answer)
+                
+                prospect_data = knowledge_base[item['pubkey']]
+                meta = prospect_data.setdefault('metadata', {})
+                
+                language = geo_data.get('language', 'xx')
+                if language != 'xx':
+                    meta['language'] = language
+                
+                country = geo_data.get('country')
+                if country:
+                    meta['country'] = country
+                
+                region = geo_data.get('region')
+                if region:
+                    meta['region'] = region
+                
+                city = geo_data.get('city')
+                if city:
+                    meta['city'] = city
+                
+                meta['geolocation_source'] = 'ia_analysis'
+                
+                ia_analyzed += 1
+                
+                # Sauvegarde intermédiaire tous les 20 profils
+                if (i + 1) % 20 == 0:
+                    self.logger.info(f"--- Sauvegarde intermédiaire ({i+1} profils IA analysés)... ---")
+                    self._save_knowledge_base(knowledge_base)
+                    
+            except Exception as e:
+                self.logger.error(f"❌ Erreur analyse IA pour {item['uid']} : {e}")
+                skipped += 1
+        
+        # Sauvegarde finale
         self._save_knowledge_base(knowledge_base)
-
-        # Agréger les résultats par PAYS
-        self.logger.info("--- Agrégation des résultats par Pays ---")
-        members_by_country = defaultdict(list)
-        for pubkey, data in knowledge_base.items():
-            country = data.get('metadata', {}).get('country')
-            if country:
-                members_by_country[country].append(data)
         
-        clusters = []
-        sorted_countries = sorted(members_by_country.items(), key=lambda item: len(item[1]), reverse=True)
-
-        for country, members in sorted_countries:
-            clusters.append({
-                "cluster_name": f"Pays : {country}",
-                "description": f"Groupe de {len(members)} membres localisés en '{country}'.",
-                "members": members
-            })
+        # Statistiques finales
+        self.logger.info(f"✅ Analyse Géo-Linguistique terminée :")
+        self.logger.info(f"   • GPS géolocalisés : {gps_geolocated}")
+        self.logger.info(f"   • GPS depuis cache : {gps_cached}")
+        self.logger.info(f"   • Analysés par IA : {ia_analyzed}")
+        self.logger.info(f"   • Ignorés : {skipped}")
+        self.logger.info(f"   • Total traités : {gps_geolocated + gps_cached + ia_analyzed}")
         
-        self._select_and_save_cluster(clusters)
+        self.shared_state['status']['AnalystAgent'] = f"Géo-Linguistique terminée : {gps_geolocated + gps_cached + ia_analyzed} profils analysés"
+
+    def _load_geo_cache(self, cache_file):
+        """Charge le cache de géolocalisation"""
+        try:
+            if os.path.exists(cache_file):
+                with open(cache_file, 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            self.logger.warning(f"⚠️ Impossible de charger le cache GPS : {e}")
+        return {}
+
+    def _save_geo_cache(self, cache, cache_file):
+        """Sauvegarde le cache de géolocalisation"""
+        try:
+            with open(cache_file, 'w') as f:
+                json.dump(cache, f, indent=2)
+        except Exception as e:
+            self.logger.warning(f"⚠️ Impossible de sauvegarder le cache GPS : {e}")
+
+    def _process_gps_batch(self, gps_batch, geo_cache):
+        """Traite un lot de coordonnées GPS en parallèle"""
+        processed = []
+        
+        for item in gps_batch:
+            try:
+                # Respecter les limites de Nominatim avec délai adaptatif
+                time.sleep(random.uniform(1.0, 1.2))
+                
+                geo_data = self._geolocate_from_coordinates(item['lat'], item['lon'])
+                
+                if geo_data:
+                    # Stocker dans le cache
+                    geo_cache[item['cache_key']] = geo_data
+                    processed.append(item)
+                    self.logger.info(f"📍 GPS batch : {item['uid']} -> {geo_data.get('country', 'N/A')}")
+                else:
+                    self.logger.debug(f"⚠️ Échec géolocalisation GPS pour {item['uid']}")
+                    
+            except Exception as e:
+                self.logger.warning(f"⚠️ Erreur dans le batch GPS pour {item['uid']} : {e}")
+        
+        return processed
 
     def _geolocate_from_coordinates(self, lat, lon):
         """
@@ -479,9 +778,10 @@ class AnalystAgent(Agent):
         Analyse les descriptions des prospects pour en extraire des mots-clés
         thématiques (tags) et les sauvegarde dans la base de connaissance.
         Inclut également les réseaux sociaux détectés dans les profils.
+        OPTIMISÉ : Cache IA + Batch processing + Prompt template réutilisé
         """
-        self.logger.info("🤖 Agent Analyste : Démarrage de l'analyse thématique enrichie (avec persistance)...")
-        self.shared_state['status']['AnalystAgent'] = "Analyse thématique enrichie en cours..."
+        self.logger.info("🤖 Agent Analyste : Démarrage de l'analyse thématique OPTIMISÉE...")
+        self.shared_state['status']['AnalystAgent'] = "Analyse thématique optimisée en cours..."
 
         if not self._check_ollama_once():
             self.shared_state['status']['AnalystAgent'] = "Échec : API Ollama indisponible."
@@ -489,7 +789,11 @@ class AnalystAgent(Agent):
             
         knowledge_base = self._load_and_sync_knowledge_base()
         
-        # --- Calculer les thèmes les plus pertinents pour guider l'IA ---
+        # --- OPTIMISATION 1 : Cache des analyses IA ---
+        ia_cache_file = os.path.join(self.shared_state['config']['workspace'], 'thematic_cache.json')
+        ia_cache = self._load_thematic_cache(ia_cache_file)
+        
+        # --- OPTIMISATION 2 : Calcul des thèmes guides (une seule fois) ---
         tag_counter = Counter()
         for pk, data in knowledge_base.items():
             if 'tags' in data.get('metadata', {}):
@@ -502,6 +806,7 @@ class AnalystAgent(Agent):
 
         prospects_to_analyze = [pk for pk, data in knowledge_base.items() if 'g1_wot' in data.get('source', '')]
         
+        # --- OPTIMISATION 3 : Charger le prompt template une seule fois ---
         thematic_prompt_template = self._load_prompt('analyst_thematic_prompt_file')
         if not thematic_prompt_template: return
 
@@ -510,6 +815,10 @@ class AnalystAgent(Agent):
         
         # Statistiques des réseaux sociaux
         social_stats = Counter()
+        
+        # --- OPTIMISATION 4 : Batch processing pour IA ---
+        ia_batch = []
+        batch_size = 5  # Traiter par lots de 5 (IA plus lente)
         
         for i, pubkey in enumerate(prospects_to_analyze):
             prospect_data = knowledge_base[pubkey]
@@ -524,7 +833,7 @@ class AnalystAgent(Agent):
             description = (source.get('description') or '').strip()
             socials = source.get('socials', [])
 
-            # --- ÉTAPE 1 : Extraire les réseaux sociaux ---
+            # --- ÉTAPE 1 : Extraire les réseaux sociaux (toujours fait) ---
             social_tags = []
             for social in socials:
                 social_type = social.get('type', '').lower()
@@ -549,74 +858,123 @@ class AnalystAgent(Agent):
                         social_tags.append(normalized_type)
                         social_stats[normalized_type] += 1
 
-            # --- ÉTAPE 2 : Analyse thématique de la description ---
+            # --- ÉTAPE 2 : Analyse thématique avec cache ---
             thematic_tags = []
             if description:
-                self.logger.info(f"Analyse thématique {needs_analysis_count}/{len(prospects_to_analyze)} : {prospect_data.get('uid', 'N/A')}")
+                # Créer une clé de cache basée sur le hash de la description
+                import hashlib
+                description_hash = hashlib.md5(description.encode()).hexdigest()
+                cache_key = f"thematic_{description_hash}"
                 
-                # Construire le prompt guidé avec la liste concise
-                prompt = f"{thematic_prompt_template}\n\nTexte fourni: \"{description}\""
-                if guide_tags:
-                    prompt += f"\nThèmes existants : {json.dumps(guide_tags)}"
+                # Vérifier le cache
+                if cache_key in ia_cache:
+                    thematic_tags = ia_cache[cache_key]
+                    self.logger.debug(f"🧠 Cache IA hit : {prospect_data.get('uid', 'N/A')}")
+                else:
+                    # Ajouter au batch IA
+                    ia_batch.append({
+                        'pubkey': pubkey,
+                        'description': description,
+                        'uid': prospect_data.get('uid', 'N/A'),
+                        'cache_key': cache_key
+                    })
+                    
+                    # Traiter le batch quand il est plein ou à la fin
+                    if len(ia_batch) >= batch_size or i == len(prospects_to_analyze) - 1:
+                        processed_batch = self._process_ia_batch(ia_batch, ia_cache, thematic_prompt_template, guide_tags)
+                        
+                        # Sauvegarder le cache
+                        self._save_thematic_cache(ia_cache, ia_cache_file)
+                        
+                        ia_batch = []
                 
-                try:
-                    ia_response = self._query_ia(prompt, expect_json=True)
-                    cleaned_answer = self._clean_ia_json_output(ia_response['answer'])
-                    thematic_tags = json.loads(cleaned_answer)
-
-                    # --- VALIDATION STRICTE ---
-                    if not isinstance(thematic_tags, list) or len(thematic_tags) > 7:
-                        self.logger.warning(f"Réponse IA invalide pour {prospect_data.get('uid')} (format ou trop de tags). Marqué comme erreur.")
-                        thematic_tags = ['error']
-                except Exception as e:
-                    self.logger.error(f"Impossible de tagger le profil {prospect_data.get('uid')} : {e}")
-                    thematic_tags = ['error']
+                # Récupérer les tags depuis le cache
+                if cache_key in ia_cache:
+                    thematic_tags = ia_cache[cache_key]
             else:
                 self.logger.debug(f"Pas de description pour {prospect_data.get('uid', 'N/A')}")
 
-            # --- ÉTAPE 3 : Séparer les tags thématiques et les réseaux sociaux ---
-            # Tags thématiques uniquement (pas de réseaux sociaux mélangés)
-            metadata['tags'] = thematic_tags
+            # --- ÉTAPE 3 : Combiner et sauvegarder ---
+            all_tags = social_tags + thematic_tags
             
-            # Réseaux sociaux dans un champ séparé
-            if social_tags:
-                metadata['web2'] = social_tags
-                self.logger.debug(f"📱 Réseaux sociaux détectés pour {prospect_data.get('uid', 'N/A')} : {', '.join(social_tags)}")
+            # Validation et nettoyage des tags
+            if all_tags:
+                # Normaliser et dédupliquer
+                normalized_tags = []
+                for tag in all_tags:
+                    normalized = self._normalize_tag(tag)
+                    if normalized and normalized not in normalized_tags:
+                        normalized_tags.append(normalized)
+                
+                metadata['tags'] = normalized_tags
             else:
-                # Ne pas créer le champ web2 s'il n'y a pas de réseaux sociaux
-                pass
+                metadata['tags'] = []
 
+            # Sauvegarde intermédiaire
             if needs_analysis_count > 0 and needs_analysis_count % save_interval == 0:
-                self.logger.info(f"--- Sauvegarde intermédiaire de la base de connaissance ({needs_analysis_count} profils analysés)... ---")
+                self.logger.info(f"--- Sauvegarde intermédiaire ({needs_analysis_count} profils analysés)... ---")
                 self._save_knowledge_base(knowledge_base)
-
-        # Afficher les statistiques des réseaux sociaux
-        self.logger.info(f"📊 Statistiques des réseaux sociaux détectés :")
-        for social_type, count in social_stats.most_common():
-            self.logger.info(f"   • {social_type}: {count} profils")
-
-        self.logger.info(f"Analyse thématique enrichie terminée. {needs_analysis_count} nouveaux profils ont été taggés. Sauvegarde finale.")
+        
+        # Sauvegarde finale
         self._save_knowledge_base(knowledge_base)
-
-        # Agréger les résultats
-        self.logger.info("--- Agrégation des résultats thématiques ---")
-        members_by_tag = defaultdict(list)
-        for pubkey, data in knowledge_base.items():
-            if 'tags' in data.get('metadata', {}):
-                for tag in data['metadata']['tags']:
-                    members_by_tag[tag].append(data)
         
-        clusters = []
-        sorted_tags = sorted(members_by_tag.items(), key=lambda item: len(item[1]), reverse=True)
-
-        for tag, members in sorted_tags:
-            clusters.append({
-                "cluster_name": f"Thème : {tag.capitalize()}",
-                "description": f"Groupe de {len(members)} membres partageant l'intérêt ou la compétence '{tag}'.",
-                "members": members
-            })
+        # Statistiques finales
+        self.logger.info(f"✅ Analyse thématique terminée :")
+        self.logger.info(f"   • Profils analysés : {needs_analysis_count}")
+        self.logger.info(f"   • Tags générés : {sum(len(data.get('metadata', {}).get('tags', [])) for data in knowledge_base.values())}")
+        self.logger.info(f"   • Réseaux sociaux détectés : {dict(social_stats)}")
         
-        self._select_and_save_cluster(clusters)
+        self.shared_state['status']['AnalystAgent'] = f"Thématique terminée : {needs_analysis_count} profils analysés"
+
+    def _load_thematic_cache(self, cache_file):
+        """Charge le cache des analyses thématiques"""
+        try:
+            if os.path.exists(cache_file):
+                with open(cache_file, 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            self.logger.warning(f"⚠️ Impossible de charger le cache thématique : {e}")
+        return {}
+
+    def _save_thematic_cache(self, cache, cache_file):
+        """Sauvegarde le cache des analyses thématiques"""
+        try:
+            with open(cache_file, 'w') as f:
+                json.dump(cache, f, indent=2)
+        except Exception as e:
+            self.logger.warning(f"⚠️ Impossible de sauvegarder le cache thématique : {e}")
+
+    def _process_ia_batch(self, ia_batch, ia_cache, prompt_template, guide_tags):
+        """Traite un lot d'analyses IA en parallèle"""
+        processed = []
+        
+        for item in ia_batch:
+            try:
+                self.logger.info(f"🧠 Analyse IA batch : {item['uid']}")
+                
+                # Construire le prompt guidé
+                prompt = f"{prompt_template}\n\nTexte fourni: \"{item['description']}\""
+                if guide_tags:
+                    prompt += f"\nThèmes existants : {json.dumps(guide_tags)}"
+                
+                ia_response = self._query_ia(prompt, expect_json=True)
+                cleaned_answer = self._clean_ia_json_output(ia_response['answer'])
+                thematic_tags = json.loads(cleaned_answer)
+
+                # Validation et stockage dans le cache
+                if isinstance(thematic_tags, list) and len(thematic_tags) <= 7:
+                    ia_cache[item['cache_key']] = thematic_tags
+                    processed.append(item)
+                    self.logger.debug(f"✅ IA batch : {item['uid']} -> {len(thematic_tags)} tags")
+                else:
+                    self.logger.warning(f"⚠️ Réponse IA invalide pour {item['uid']}")
+                    ia_cache[item['cache_key']] = ['error']
+                    
+            except Exception as e:
+                self.logger.error(f"❌ Erreur dans le batch IA pour {item['uid']} : {e}")
+                ia_cache[item['cache_key']] = ['error']
+        
+        return processed
 
     def run_test_mode(self):
         """
@@ -1553,8 +1911,8 @@ Le persona doit être une synthèse créative des thèmes {', '.join(theme_group
             self.logger.warning("⚠️ Aucun prospect trouvé avec les thèmes sélectionnés.")
             return
         
-        # Étape 3 : Options de filtrage géographique
-        print(f"\n🌍 FILTRAGE GÉOGRAPHIQUE")
+        # Étape 3 : Options de filtrage avancées
+        print(f"\n🎯 FILTRAGE AVANCÉ")
         print("=" * 50)
         print(f"Prospects des thèmes sélectionnés : {len(filtered_prospects)}")
         print()
@@ -1563,11 +1921,14 @@ Le persona doit être une synthèse créative des thèmes {', '.join(theme_group
         print("2. Filtrer par langue")
         print("3. Filtrer par pays")
         print("4. Filtrer par région")
-        print("5. Combinaison de filtres")
+        print("5. Filtrer par plateforme (G1/Gchange)")
+        print("6. Filtrer par comptes liés")
+        print("7. Filtrer par activité Gchange")
+        print("8. Combinaison de filtres")
         print("r. Retour")
         
         try:
-            filter_choice = input("\nChoisissez une option (1-5) ou 'r' pour retour : ").strip()
+            filter_choice = input("\nChoisissez une option (1-8) ou 'r' pour retour : ").strip()
             
             if filter_choice.lower() == 'r':
                 self.logger.info("Retour à la sélection des thèmes...")
@@ -1581,7 +1942,13 @@ Le persona doit être une synthèse créative des thèmes {', '.join(theme_group
             elif filter_choice == "4":
                 final_prospects = self._filter_by_region(filtered_prospects)
             elif filter_choice == "5":
-                final_prospects = self._filter_combined(filtered_prospects)
+                final_prospects = self._filter_by_platform(filtered_prospects)
+            elif filter_choice == "6":
+                final_prospects = self._filter_by_linked_accounts(filtered_prospects)
+            elif filter_choice == "7":
+                final_prospects = self._filter_by_gchange_activity(filtered_prospects)
+            elif filter_choice == "8":
+                final_prospects = self._filter_combined_advanced(filtered_prospects)
             else:
                 self.logger.warning("⚠️ Option invalide, aucun filtre appliqué.")
                 final_prospects = filtered_prospects
@@ -1704,56 +2071,431 @@ Le persona doit être une synthèse créative des thèmes {', '.join(theme_group
 
     def _filter_by_region(self, prospects):
         """Filtre les prospects par région"""
-        print(f"\n🌍 RÉGIONS DISPONIBLES :")
+        self.logger.info("🌍 Agent Analyste : Ciblage par région...")
+        
+        # Charger la base de connaissance
+        knowledge_base = self._load_and_sync_knowledge_base()
+        if not knowledge_base:
+            self.logger.error("❌ Base de connaissance vide.")
+            return
         
         # Analyser les régions disponibles
         regions = {}
-        for prospect in prospects:
-            metadata = prospect.get('metadata', {})
+        for pubkey, data in knowledge_base.items():
+            metadata = data.get('metadata', {})
             region = metadata.get('region')
             country = metadata.get('country', '')
             if region:
                 region_key = f"{region}, {country}" if country else region
                 regions[region_key] = regions.get(region_key, 0) + 1
         
-        # Afficher les régions
+        if not regions:
+            self.logger.error("❌ Aucune région détectée dans la base de connaissance.")
+            return
+        
+        # Afficher les options
+        print("\n🌍 RÉGIONS DISPONIBLES :")
+        print("=" * 50)
+        
         region_list = sorted(regions.items(), key=lambda x: x[1], reverse=True)
         for i, (region, count) in enumerate(region_list, 1):
-            print(f"{i}. {region} ({count} prospects)")
-        
-        print("r. Retour")
+            print(f"{i}. Région : {region} ({count} membres)")
+            print(f"    Description : Groupe de {count} membres localisés en '{region}'.")
+            print()
         
         try:
-            choice = input("\nSélectionnez les régions (ex: 1,2), 'all' pour toutes, ou 'r' pour retour : ").strip()
-            if choice.lower() == 'r':
-                self.logger.info("Retour aux options de filtrage...")
-                return prospects
+            choice = input("Sélectionnez une région (numéro) : ").strip()
+            if not choice:
+                self.logger.info("Opération annulée.")
+                return
             
-            if choice.lower() == 'all':
-                selected_regions = [region for region, _ in region_list]
-            else:
-                selected_indices = [int(x.strip()) - 1 for x in choice.split(',')]
-                selected_regions = [region_list[i][0] for i in selected_indices if 0 <= i < len(region_list)]
+            selected_index = int(choice) - 1
+            if not (0 <= selected_index < len(region_list)):
+                self.logger.error("❌ Sélection invalide.")
+                return
             
-            if not selected_regions:
-                return prospects
+            selected_region, count = region_list[selected_index]
             
-            # Filtrer
-            filtered = []
-            for prospect in prospects:
-                metadata = prospect.get('metadata', {})
+            # Filtrer les prospects
+            filtered_prospects = []
+            for pubkey, data in knowledge_base.items():
+                metadata = data.get('metadata', {})
                 region = metadata.get('region')
                 country = metadata.get('country', '')
                 region_key = f"{region}, {country}" if country else region
-                if region_key in selected_regions:
-                    filtered.append(prospect)
+                if region_key == selected_region:
+                    filtered_prospects.append({
+                        'pubkey': pubkey,
+                        'uid': data.get('uid', ''),
+                        'metadata': metadata
+                    })
             
-            self.logger.info(f"✅ Filtrage par région : {len(filtered)} prospects sélectionnés")
-            return filtered
+            # Créer un cluster simple pour la région sélectionnée
+            cluster = {
+                'cluster_name': f'Région {selected_region}',
+                'description': f'Prospects localisés en {selected_region}',
+                'members': filtered_prospects
+            }
             
-        except (ValueError, IndexError):
-            self.logger.warning("⚠️ Erreur dans la sélection, aucun filtre appliqué.")
-            return prospects
+            # Sauvegarder et gérer le retour
+            result = self._select_and_save_cluster([cluster])
+            
+            if result == "quit":
+                return
+            elif result == "continue":
+                # L'utilisateur veut continuer vers l'Agent Stratège
+                print("\n🎯 Prêt pour l'Agent Stratège ! Retournez au menu principal et choisissez l'option 2.")
+                return
+            
+        except (ValueError, KeyboardInterrupt):
+            self.logger.error("❌ Erreur dans la sélection.")
+
+    def select_cluster_by_linked_accounts(self):
+        """
+        Sélectionne les prospects selon leurs comptes liés (relations Cesium-Gchange).
+        Permet de cibler des utilisateurs qui ont des comptes sur les deux plateformes.
+        """
+        self.logger.info("🔗 Agent Analyste : Ciblage par comptes liés...")
+        
+        # Charger la base de connaissance
+        knowledge_base = self._load_and_sync_knowledge_base()
+        if not knowledge_base:
+            self.logger.error("❌ Base de connaissance vide.")
+            return
+        
+        # Analyser les types de comptes liés disponibles
+        linked_accounts_stats = {
+            'cesium_only': 0,
+            'gchange_only': 0,
+            'both_platforms': 0,
+            'no_linked': 0
+        }
+        
+        linked_prospects = []
+        
+        for pubkey, data in knowledge_base.items():
+            linked_accounts = data.get('linked_accounts', {})
+            
+            if not linked_accounts:
+                linked_accounts_stats['no_linked'] += 1
+                continue
+            
+            cesium_pk = linked_accounts.get('cesium_pubkey')
+            gchange_uid = linked_accounts.get('gchange_uid')
+            
+            if cesium_pk and gchange_uid:
+                linked_accounts_stats['both_platforms'] += 1
+                linked_prospects.append({
+                    'pubkey': pubkey,
+                    'uid': data.get('uid', ''),
+                    'metadata': data.get('metadata', {}),
+                    'linked_accounts': linked_accounts,
+                    'type': 'both_platforms'
+                })
+            elif cesium_pk:
+                linked_accounts_stats['cesium_only'] += 1
+                linked_prospects.append({
+                    'pubkey': pubkey,
+                    'uid': data.get('uid', ''),
+                    'metadata': data.get('metadata', {}),
+                    'linked_accounts': linked_accounts,
+                    'type': 'cesium_only'
+                })
+            elif gchange_uid:
+                linked_accounts_stats['gchange_only'] += 1
+                linked_prospects.append({
+                    'pubkey': pubkey,
+                    'uid': data.get('uid', ''),
+                    'metadata': data.get('metadata', {}),
+                    'linked_accounts': linked_accounts,
+                    'type': 'gchange_only'
+                })
+        
+        if not linked_prospects:
+            self.logger.error("❌ Aucun prospect avec des comptes liés trouvé.")
+            return
+        
+        # Afficher les options
+        print("\n🔗 COMPTES LIÉS DISPONIBLES :")
+        print("=" * 50)
+        print(f"1. Utilisateurs sur les deux plateformes ({linked_accounts_stats['both_platforms']} membres)")
+        print(f"   Description : Prospects ayant des comptes Cesium ET Gchange.")
+        print()
+        print(f"2. Utilisateurs Cesium uniquement ({linked_accounts_stats['cesium_only']} membres)")
+        print(f"   Description : Prospects avec compte Cesium découvert via Gchange.")
+        print()
+        print(f"3. Utilisateurs Gchange uniquement ({linked_accounts_stats['gchange_only']} membres)")
+        print(f"   Description : Prospects Gchange avec compte Cesium lié.")
+        print()
+        print(f"4. Tous les comptes liés ({len(linked_prospects)} membres)")
+        print(f"   Description : Tous les prospects avec au moins un compte lié.")
+        print()
+        
+        try:
+            choice = input("Sélectionnez un type de ciblage (1-4) : ").strip()
+            if not choice:
+                self.logger.info("Opération annulée.")
+                return
+            
+            choice = int(choice)
+            if not (1 <= choice <= 4):
+                self.logger.error("❌ Sélection invalide.")
+                return
+            
+            # Filtrer selon le choix
+            if choice == 1:
+                filtered_prospects = [p for p in linked_prospects if p['type'] == 'both_platforms']
+                cluster_name = "Utilisateurs multi-plateformes"
+                description = "Prospects ayant des comptes sur Cesium ET Gchange"
+            elif choice == 2:
+                filtered_prospects = [p for p in linked_prospects if p['type'] == 'cesium_only']
+                cluster_name = "Utilisateurs Cesium découverts"
+                description = "Prospects Cesium découverts via leurs profils Gchange"
+            elif choice == 3:
+                filtered_prospects = [p for p in linked_prospects if p['type'] == 'gchange_only']
+                cluster_name = "Utilisateurs Gchange avec Cesium"
+                description = "Prospects Gchange ayant un compte Cesium lié"
+            else:  # choice == 4
+                filtered_prospects = linked_prospects
+                cluster_name = "Tous les comptes liés"
+                description = "Tous les prospects avec des comptes liés"
+            
+            if not filtered_prospects:
+                self.logger.warning("⚠️ Aucun prospect correspondant au critère sélectionné.")
+                return
+            
+            # Créer le cluster
+            cluster = {
+                'cluster_name': cluster_name,
+                'description': f"{description} ({len(filtered_prospects)} prospects)",
+                'members': filtered_prospects
+            }
+            
+            # Afficher des statistiques sur la cible
+            print(f"\n📊 STATISTIQUES DE LA CIBLE SÉLECTIONNÉE")
+            print(f"   • Nombre de prospects : {len(filtered_prospects)}")
+            
+            # Analyser les langues
+            languages = {}
+            for prospect in filtered_prospects:
+                metadata = prospect.get('metadata', {})
+                lang = metadata.get('language', 'xx')
+                if lang != 'xx':
+                    languages[lang] = languages.get(lang, 0) + 1
+            
+            if languages:
+                lang_str = ", ".join([f"{k}({v})" for k, v in sorted(languages.items(), key=lambda x: x[1], reverse=True)])
+                print(f"   • Langues : {lang_str}")
+            
+            # Analyser les pays
+            countries = {}
+            for prospect in filtered_prospects:
+                metadata = prospect.get('metadata', {})
+                country = metadata.get('country')
+                if country:
+                    countries[country] = countries.get(country, 0) + 1
+            
+            if countries:
+                country_str = ", ".join([f"{k}({v})" for k, v in sorted(countries.items(), key=lambda x: x[1], reverse=True)[:3]])
+                print(f"   • Pays principaux : {country_str}")
+            
+            # Sauvegarder et gérer le retour
+            result = self._select_and_save_cluster([cluster])
+            
+            if result == "quit":
+                return
+            elif result == "continue":
+                # L'utilisateur veut continuer vers l'Agent Stratège
+                print("\n🎯 Prêt pour l'Agent Stratège ! Retournez au menu principal et choisissez l'option 2.")
+                return
+            
+        except (ValueError, KeyboardInterrupt):
+            self.logger.error("❌ Erreur dans la sélection.")
+
+    def select_cluster_by_gchange(self):
+        """
+        Sélectionne les prospects spécifiquement de la plateforme Gchange.
+        Permet de cibler les utilisateurs actifs sur le marché Gchange.
+        """
+        self.logger.info("🛒 Agent Analyste : Ciblage par comptes Gchange...")
+        
+        # Charger la base de connaissance
+        knowledge_base = self._load_and_sync_knowledge_base()
+        if not knowledge_base:
+            self.logger.error("❌ Base de connaissance vide.")
+            return
+        
+        # Analyser les prospects Gchange disponibles
+        gchange_prospects = []
+        gchange_stats = {
+            'with_cesium': 0,
+            'without_cesium': 0,
+            'with_ads': 0,
+            'without_ads': 0
+        }
+        
+        for pubkey, data in knowledge_base.items():
+            source = data.get('source', '')
+            
+            # Identifier les prospects Gchange
+            if 'gchange' in source:
+                prospect_info = {
+                    'pubkey': pubkey,
+                    'uid': data.get('uid', ''),
+                    'metadata': data.get('metadata', {}),
+                    'profile': data.get('profile', {}),
+                    'linked_accounts': data.get('linked_accounts', {}),
+                    'import_metadata': data.get('import_metadata', {})
+                }
+                
+                gchange_prospects.append(prospect_info)
+                
+                # Statistiques
+                if prospect_info['linked_accounts'].get('cesium_pubkey'):
+                    gchange_stats['with_cesium'] += 1
+                else:
+                    gchange_stats['without_cesium'] += 1
+                
+                # Vérifier s'il y a des annonces détectées
+                profile_source = prospect_info['profile'].get('_source', {})
+                detected_ads = profile_source.get('detected_ads', [])
+                if detected_ads:
+                    gchange_stats['with_ads'] += 1
+                else:
+                    gchange_stats['without_ads'] += 1
+        
+        if not gchange_prospects:
+            self.logger.error("❌ Aucun prospect Gchange trouvé dans la base de connaissance.")
+            return
+        
+        # Afficher les options
+        print("\n🛒 COMPTES GCHANGE DISPONIBLES :")
+        print("=" * 50)
+        print(f"Total : {len(gchange_prospects)} prospects Gchange")
+        print()
+        print(f"1. Tous les utilisateurs Gchange ({len(gchange_prospects)} membres)")
+        print(f"   Description : Tous les prospects de la plateforme Gchange.")
+        print()
+        print(f"2. Utilisateurs Gchange avec compte Cesium ({gchange_stats['with_cesium']} membres)")
+        print(f"   Description : Prospects Gchange ayant un compte Cesium lié.")
+        print()
+        print(f"3. Utilisateurs Gchange uniquement ({gchange_stats['without_cesium']} membres)")
+        print(f"   Description : Prospects Gchange sans compte Cesium.")
+        print()
+        print(f"4. Utilisateurs Gchange avec annonces ({gchange_stats['with_ads']} membres)")
+        print(f"   Description : Prospects Gchange ayant publié des annonces.")
+        print()
+        print(f"5. Utilisateurs Gchange sans annonces ({gchange_stats['without_ads']} membres)")
+        print(f"   Description : Prospects Gchange sans annonces détectées.")
+        print()
+        
+        try:
+            choice = input("Sélectionnez un type de ciblage (1-5) : ").strip()
+            if not choice:
+                self.logger.info("Opération annulée.")
+                return
+            
+            choice = int(choice)
+            if not (1 <= choice <= 5):
+                self.logger.error("❌ Sélection invalide.")
+                return
+            
+            # Filtrer selon le choix
+            if choice == 1:
+                filtered_prospects = gchange_prospects
+                cluster_name = "Tous les utilisateurs Gchange"
+                description = "Tous les prospects de la plateforme Gchange"
+            elif choice == 2:
+                filtered_prospects = [p for p in gchange_prospects if p['linked_accounts'].get('cesium_pubkey')]
+                cluster_name = "Gchange avec Cesium"
+                description = "Prospects Gchange ayant un compte Cesium lié"
+            elif choice == 3:
+                filtered_prospects = [p for p in gchange_prospects if not p['linked_accounts'].get('cesium_pubkey')]
+                cluster_name = "Gchange uniquement"
+                description = "Prospects Gchange sans compte Cesium"
+            elif choice == 4:
+                filtered_prospects = []
+                for p in gchange_prospects:
+                    profile_source = p['profile'].get('_source', {})
+                    detected_ads = profile_source.get('detected_ads', [])
+                    if detected_ads:
+                        filtered_prospects.append(p)
+                cluster_name = "Gchange avec annonces"
+                description = "Prospects Gchange ayant publié des annonces"
+            else:  # choice == 5
+                filtered_prospects = []
+                for p in gchange_prospects:
+                    profile_source = p['profile'].get('_source', {})
+                    detected_ads = profile_source.get('detected_ads', [])
+                    if not detected_ads:
+                        filtered_prospects.append(p)
+                cluster_name = "Gchange sans annonces"
+                description = "Prospects Gchange sans annonces détectées"
+            
+            if not filtered_prospects:
+                self.logger.warning("⚠️ Aucun prospect correspondant au critère sélectionné.")
+                return
+            
+            # Créer le cluster
+            cluster = {
+                'cluster_name': cluster_name,
+                'description': f"{description} ({len(filtered_prospects)} prospects)",
+                'members': filtered_prospects
+            }
+            
+            # Afficher des statistiques sur la cible
+            print(f"\n📊 STATISTIQUES DE LA CIBLE SÉLECTIONNÉE")
+            print(f"   • Nombre de prospects : {len(filtered_prospects)}")
+            
+            # Analyser les langues
+            languages = {}
+            for prospect in filtered_prospects:
+                metadata = prospect.get('metadata', {})
+                lang = metadata.get('language', 'xx')
+                if lang != 'xx':
+                    languages[lang] = languages.get(lang, 0) + 1
+            
+            if languages:
+                lang_str = ", ".join([f"{k}({v})" for k, v in sorted(languages.items(), key=lambda x: x[1], reverse=True)])
+                print(f"   • Langues : {lang_str}")
+            
+            # Analyser les pays
+            countries = {}
+            for prospect in filtered_prospects:
+                metadata = prospect.get('metadata', {})
+                country = metadata.get('country')
+                if country:
+                    countries[country] = countries.get(country, 0) + 1
+            
+            if countries:
+                country_str = ", ".join([f"{k}({v})" for k, v in sorted(countries.items(), key=lambda x: x[1], reverse=True)[:3]])
+                print(f"   • Pays principaux : {country_str}")
+            
+            # Analyser les thèmes
+            themes = {}
+            for prospect in filtered_prospects:
+                metadata = prospect.get('metadata', {})
+                tags = metadata.get('tags', [])
+                for tag in tags:
+                    themes[tag] = themes.get(tag, 0) + 1
+            
+            if themes:
+                top_themes = sorted(themes.items(), key=lambda x: x[1], reverse=True)[:5]
+                theme_str = ", ".join([f"{k}({v})" for k, v in top_themes])
+                print(f"   • Thèmes principaux : {theme_str}")
+            
+            # Sauvegarder et gérer le retour
+            result = self._select_and_save_cluster([cluster])
+            
+            if result == "quit":
+                return
+            elif result == "continue":
+                # L'utilisateur veut continuer vers l'Agent Stratège
+                print("\n🎯 Prêt pour l'Agent Stratège ! Retournez au menu principal et choisissez l'option 2.")
+                return
+            
+        except (ValueError, KeyboardInterrupt):
+            self.logger.error("❌ Erreur dans la sélection.")
 
     def _filter_combined(self, prospects):
         """Filtre combiné (langue + pays + région)"""
@@ -2064,7 +2806,7 @@ Le persona doit être une synthèse créative des thèmes {', '.join(theme_group
                 return
             
         except (ValueError, KeyboardInterrupt):
-            self.logger.error("❌ Erreur dans la sélection.") 
+            self.logger.error("❌ Erreur dans la sélection.")
 
     def translate_persona_bank(self):
         """
@@ -2253,4 +2995,519 @@ Réponds UNIQUEMENT avec un objet JSON valide au format suivant :
                 continue
         
         return multilingual_content if multilingual_content else None 
+
+    def _filter_by_platform(self, prospects):
+        """Filtre les prospects par plateforme (G1/Gchange)"""
+        print(f"\n🖥️ PLATEFORMES DISPONIBLES :")
+        
+        # Analyser les plateformes disponibles
+        platforms = {}
+        for prospect in prospects:
+            # Récupérer les données complètes depuis la base de connaissance
+            knowledge_base = self._load_and_sync_knowledge_base()
+            pubkey = prospect.get('pubkey')
+            if pubkey in knowledge_base:
+                data = knowledge_base[pubkey]
+                source = data.get('source', '')
+                
+                if 'g1_wot' in source:
+                    platforms['G1 (WoT)'] = platforms.get('G1 (WoT)', 0) + 1
+                elif 'gchange' in source:
+                    platforms['Gchange'] = platforms.get('Gchange', 0) + 1
+                else:
+                    platforms['Autre'] = platforms.get('Autre', 0) + 1
+        
+        # Afficher les plateformes
+        platform_list = sorted(platforms.items(), key=lambda x: x[1], reverse=True)
+        for i, (platform, count) in enumerate(platform_list, 1):
+            print(f"{i}. {platform} ({count} prospects)")
+        
+        print("r. Retour")
+        
+        try:
+            choice = input("\nSélectionnez les plateformes (ex: 1,2), 'all' pour toutes, ou 'r' pour retour : ").strip()
+            if choice.lower() == 'r':
+                self.logger.info("Retour aux options de filtrage...")
+                return prospects
+            
+            if choice.lower() == 'all':
+                selected_platforms = [platform for platform, _ in platform_list]
+            else:
+                selected_indices = [int(x.strip()) - 1 for x in choice.split(',')]
+                selected_platforms = [platform_list[i][0] for i in selected_indices if 0 <= i < len(platform_list)]
+            
+            if not selected_platforms:
+                return prospects
+            
+            # Filtrer
+            filtered = []
+            for prospect in prospects:
+                pubkey = prospect.get('pubkey')
+                if pubkey in knowledge_base:
+                    data = knowledge_base[pubkey]
+                    source = data.get('source', '')
+                    
+                    platform_type = 'Autre'
+                    if 'g1_wot' in source:
+                        platform_type = 'G1 (WoT)'
+                    elif 'gchange' in source:
+                        platform_type = 'Gchange'
+                    
+                    if platform_type in selected_platforms:
+                        filtered.append(prospect)
+            
+            self.logger.info(f"✅ Filtrage par plateforme : {len(filtered)} prospects sélectionnés")
+            return filtered
+            
+        except (ValueError, IndexError):
+            self.logger.warning("⚠️ Erreur dans la sélection, aucun filtre appliqué.")
+            return prospects
+
+    def _filter_by_linked_accounts(self, prospects):
+        """Filtre les prospects par comptes liés"""
+        print(f"\n🔗 TYPES DE COMPTES LIÉS :")
+        print("1. Utilisateurs multi-plateformes (Cesium + Gchange)")
+        print("2. Utilisateurs avec compte Cesium uniquement")
+        print("3. Utilisateurs avec compte Gchange uniquement")
+        print("4. Utilisateurs sans comptes liés")
+        print("5. Tous les utilisateurs avec comptes liés")
+        print("r. Retour")
+        
+        try:
+            choice = input("\nSélectionnez un type (1-5) ou 'r' pour retour : ").strip()
+            if choice.lower() == 'r':
+                self.logger.info("Retour aux options de filtrage...")
+                return prospects
+            
+            choice = int(choice)
+            if not (1 <= choice <= 5):
+                self.logger.warning("⚠️ Choix invalide, aucun filtre appliqué.")
+                return prospects
+            
+            # Charger la base de connaissance pour accéder aux données complètes
+            knowledge_base = self._load_and_sync_knowledge_base()
+            
+            filtered = []
+            for prospect in prospects:
+                pubkey = prospect.get('pubkey')
+                if pubkey in knowledge_base:
+                    data = knowledge_base[pubkey]
+                    linked_accounts = data.get('linked_accounts', {})
+                    
+                    cesium_pk = linked_accounts.get('cesium_pubkey')
+                    gchange_uid = linked_accounts.get('gchange_uid')
+                    
+                    include_prospect = False
+                    
+                    if choice == 1:  # Multi-plateformes
+                        include_prospect = cesium_pk and gchange_uid
+                    elif choice == 2:  # Cesium uniquement
+                        include_prospect = cesium_pk and not gchange_uid
+                    elif choice == 3:  # Gchange uniquement
+                        include_prospect = gchange_uid and not cesium_pk
+                    elif choice == 4:  # Sans comptes liés
+                        include_prospect = not cesium_pk and not gchange_uid
+                    elif choice == 5:  # Tous avec comptes liés
+                        include_prospect = cesium_pk or gchange_uid
+                    
+                    if include_prospect:
+                        filtered.append(prospect)
+            
+            self.logger.info(f"✅ Filtrage par comptes liés : {len(filtered)} prospects sélectionnés")
+            return filtered
+            
+        except ValueError:
+            self.logger.warning("⚠️ Erreur dans la sélection, aucun filtre appliqué.")
+            return prospects
+
+    def _filter_by_gchange_activity(self, prospects):
+        """Filtre les prospects par activité Gchange"""
+        print(f"\n🛒 ACTIVITÉ GCHANGE :")
+        print("1. Utilisateurs Gchange avec annonces")
+        print("2. Utilisateurs Gchange sans annonces")
+        print("3. Utilisateurs Gchange avec compte Cesium")
+        print("4. Utilisateurs Gchange uniquement")
+        print("r. Retour")
+        
+        try:
+            choice = input("\nSélectionnez un type (1-4) ou 'r' pour retour : ").strip()
+            if choice.lower() == 'r':
+                self.logger.info("Retour aux options de filtrage...")
+                return prospects
+            
+            choice = int(choice)
+            if not (1 <= choice <= 4):
+                self.logger.warning("⚠️ Choix invalide, aucun filtre appliqué.")
+                return prospects
+            
+            # Charger la base de connaissance
+            knowledge_base = self._load_and_sync_knowledge_base()
+            
+            filtered = []
+            for prospect in prospects:
+                pubkey = prospect.get('pubkey')
+                if pubkey in knowledge_base:
+                    data = knowledge_base[pubkey]
+                    source = data.get('source', '')
+                    
+                    # Vérifier si c'est un utilisateur Gchange
+                    if 'gchange' not in source:
+                        continue
+                    
+                    linked_accounts = data.get('linked_accounts', {})
+                    profile = data.get('profile', {})
+                    profile_source = profile.get('_source', {})
+                    detected_ads = profile_source.get('detected_ads', [])
+                    
+                    include_prospect = False
+                    
+                    if choice == 1:  # Avec annonces
+                        include_prospect = bool(detected_ads)
+                    elif choice == 2:  # Sans annonces
+                        include_prospect = not detected_ads
+                    elif choice == 3:  # Avec Cesium
+                        include_prospect = bool(linked_accounts.get('cesium_pubkey'))
+                    elif choice == 4:  # Gchange uniquement
+                        include_prospect = not linked_accounts.get('cesium_pubkey')
+                    
+                    if include_prospect:
+                        filtered.append(prospect)
+            
+            self.logger.info(f"✅ Filtrage par activité Gchange : {len(filtered)} prospects sélectionnés")
+            return filtered
+            
+        except ValueError:
+            self.logger.warning("⚠️ Erreur dans la sélection, aucun filtre appliqué.")
+            return prospects
+
+    def _filter_combined_advanced(self, prospects):
+        """Filtre combiné avancé avec toutes les options"""
+        self.logger.info("🔀 Filtrage combiné avancé...")
+        
+        print(f"\n🔀 FILTRAGE COMBINÉ AVANCÉ")
+        print("=" * 50)
+        print("Appliquez les filtres dans l'ordre souhaité :")
+        print("1. Langue")
+        print("2. Pays")
+        print("3. Région")
+        print("4. Plateforme")
+        print("5. Comptes liés")
+        print("6. Activité Gchange")
+        print("7. Appliquer tous les filtres")
+        print("r. Retour")
+        
+        try:
+            choice = input("\nChoisissez une option (1-7) ou 'r' pour retour : ").strip()
+            
+            if choice.lower() == 'r':
+                return prospects
+            elif choice == "1":
+                prospects = self._filter_by_language(prospects)
+            elif choice == "2":
+                prospects = self._filter_by_country(prospects)
+            elif choice == "3":
+                prospects = self._filter_by_region(prospects)
+            elif choice == "4":
+                prospects = self._filter_by_platform(prospects)
+            elif choice == "5":
+                prospects = self._filter_by_linked_accounts(prospects)
+            elif choice == "6":
+                prospects = self._filter_by_gchange_activity(prospects)
+            elif choice == "7":
+                # Appliquer tous les filtres en cascade
+                prospects = self._filter_by_language(prospects)
+                if prospects:
+                    prospects = self._filter_by_country(prospects)
+                if prospects:
+                    prospects = self._filter_by_region(prospects)
+                if prospects:
+                    prospects = self._filter_by_platform(prospects)
+                if prospects:
+                    prospects = self._filter_by_linked_accounts(prospects)
+                if prospects:
+                    prospects = self._filter_by_gchange_activity(prospects)
+            else:
+                self.logger.warning("⚠️ Option invalide.")
+            
+            return prospects
+            
+        except Exception as e:
+            self.logger.error(f"❌ Erreur dans le filtrage combiné : {e}")
+            return prospects
+
+    def run_optimized_analysis_suite(self):
+        """
+        Suite d'analyse optimisée combinant géo-linguistique et thématique
+        avec des optimisations avancées : cache, batch processing, parallélisation.
+        """
+        self.logger.info("🚀 Agent Analyste : Démarrage de la suite d'analyse OPTIMISÉE...")
+        self.shared_state['status']['AnalystAgent'] = "Suite d'analyse optimisée en cours..."
+
+        # Vérifier Ollama une seule fois
+        if not self._check_ollama_once():
+            self.shared_state['status']['AnalystAgent'] = "Échec : API Ollama indisponible."
+            return
+
+        knowledge_base = self._load_and_sync_knowledge_base()
+        
+        # --- OPTIMISATION 1 : Pré-calcul des données communes ---
+        self.logger.info("📊 Pré-calcul des données communes...")
+        
+        # Identifier tous les prospects à analyser
+        all_prospects = [pk for pk, data in knowledge_base.items() if 'g1_wot' in data.get('source', '')]
+        prospects_with_gps = []
+        prospects_with_description = []
+        
+        for pk in all_prospects:
+            data = knowledge_base[pk]
+            profile = data.get('profile', {})
+            source = profile.get('_source', {})
+            
+            # Vérifier GPS
+            geo_point = source.get('geoPoint', {})
+            if geo_point and 'lat' in geo_point and 'lon' in geo_point:
+                lat = geo_point.get('lat')
+                lon = geo_point.get('lon')
+                if lat is not None and lon is not None and lat != 0 and lon != 0:
+                    prospects_with_gps.append(pk)
+            
+            # Vérifier description
+            description = (source.get('description') or '').strip()
+            if description:
+                prospects_with_description.append(pk)
+        
+        self.logger.info(f"📈 Statistiques pré-calculées :")
+        self.logger.info(f"   • Total prospects : {len(all_prospects)}")
+        self.logger.info(f"   • Avec GPS : {len(prospects_with_gps)}")
+        self.logger.info(f"   • Avec description : {len(prospects_with_description)}")
+        
+        # --- OPTIMISATION 2 : Charger tous les prompts une seule fois ---
+        geo_prompt_template = self._load_prompt('analyst_language_prompt_file')
+        thematic_prompt_template = self._load_prompt('analyst_thematic_prompt_file')
+        
+        if not geo_prompt_template or not thematic_prompt_template:
+            self.logger.error("❌ Impossible de charger les prompts templates.")
+            return
+        
+        # --- OPTIMISATION 3 : Charger tous les caches ---
+        geo_cache_file = os.path.join(self.shared_state['config']['workspace'], 'geo_cache.json')
+        thematic_cache_file = os.path.join(self.shared_state['config']['workspace'], 'thematic_cache.json')
+        
+        geo_cache = self._load_geo_cache(geo_cache_file)
+        thematic_cache = self._load_thematic_cache(thematic_cache_file)
+        
+        # --- OPTIMISATION 4 : Calcul des thèmes guides ---
+        tag_counter = Counter()
+        for pk, data in knowledge_base.items():
+            if 'tags' in data.get('metadata', {}):
+                tag_counter.update(data['metadata']['tags'])
+        
+        guide_tags = [tag for tag, count in tag_counter.most_common(50)]
+        
+        # --- OPTIMISATION 5 : Traitement optimisé par phases ---
+        
+        # PHASE 1 : Géolocalisation GPS (batch processing)
+        self.logger.info("📍 PHASE 1 : Géolocalisation GPS optimisée...")
+        gps_stats = self._run_optimized_gps_analysis(
+            knowledge_base, prospects_with_gps, geo_cache, geo_cache_file
+        )
+        
+        # PHASE 2 : Analyse thématique (batch processing)
+        self.logger.info("🏷️ PHASE 2 : Analyse thématique optimisée...")
+        thematic_stats = self._run_optimized_thematic_analysis(
+            knowledge_base, prospects_with_description, thematic_cache, 
+            thematic_cache_file, thematic_prompt_template, guide_tags
+        )
+        
+        # PHASE 3 : Analyse IA pour les cas restants
+        self.logger.info("🧠 PHASE 3 : Analyse IA pour cas restants...")
+        ia_stats = self._run_optimized_ia_analysis(
+            knowledge_base, all_prospects, geo_prompt_template
+        )
+        
+        # --- RÉSULTATS FINAUX ---
+        self.logger.info("✅ Suite d'analyse optimisée terminée !")
+        self.logger.info(f"📊 RÉSULTATS FINAUX :")
+        self.logger.info(f"   • GPS géolocalisés : {gps_stats['geolocated']}")
+        self.logger.info(f"   • GPS depuis cache : {gps_stats['cached']}")
+        self.logger.info(f"   • Tags générés : {thematic_stats['tags_generated']}")
+        self.logger.info(f"   • Analyses IA : {ia_stats['ia_analyzed']}")
+        self.logger.info(f"   • Total traités : {gps_stats['geolocated'] + gps_stats['cached'] + ia_stats['ia_analyzed']}")
+        
+        self.shared_state['status']['AnalystAgent'] = f"Suite optimisée terminée : {gps_stats['geolocated'] + gps_stats['cached'] + ia_stats['ia_analyzed']} profils analysés"
+
+    def _run_optimized_gps_analysis(self, knowledge_base, prospects_with_gps, geo_cache, geo_cache_file):
+        """Analyse GPS optimisée avec batch processing"""
+        gps_geolocated = 0
+        gps_cached = 0
+        batch_size = 15  # Batch plus grand pour GPS
+        gps_batch = []
+        
+        for i, pubkey in enumerate(prospects_with_gps):
+            prospect_data = knowledge_base[pubkey]
+            
+            if 'language' in prospect_data.get('metadata', {}):
+                continue
+            
+            profile = prospect_data.get('profile', {})
+            source = profile.get('_source', {})
+            geo_point = source.get('geoPoint', {})
+            
+            lat = geo_point.get('lat')
+            lon = geo_point.get('lon')
+            cache_key = f"{lat:.4f},{lon:.4f}"
+            
+            if cache_key in geo_cache:
+                gps_cached += 1
+                self._apply_geo_data(prospect_data, geo_cache[cache_key])
+            else:
+                gps_batch.append({
+                    'pubkey': pubkey,
+                    'lat': lat,
+                    'lon': lon,
+                    'uid': prospect_data.get('uid', 'N/A'),
+                    'cache_key': cache_key
+                })
+                
+                if len(gps_batch) >= batch_size or i == len(prospects_with_gps) - 1:
+                    processed = self._process_gps_batch(gps_batch, geo_cache)
+                    gps_geolocated += len(processed)
+                    self._save_geo_cache(geo_cache, geo_cache_file)
+                    gps_batch = []
+        
+        return {'geolocated': gps_geolocated, 'cached': gps_cached}
+
+    def _run_optimized_thematic_analysis(self, knowledge_base, prospects_with_description, 
+                                       thematic_cache, thematic_cache_file, prompt_template, guide_tags):
+        """Analyse thématique optimisée avec batch processing"""
+        tags_generated = 0
+        batch_size = 8  # Batch optimal pour IA
+        ia_batch = []
+        
+        for i, pubkey in enumerate(prospects_with_description):
+            prospect_data = knowledge_base[pubkey]
+            metadata = prospect_data.setdefault('metadata', {})
+            
+            if 'tags' in metadata:
+                continue
+            
+            profile = prospect_data.get('profile', {})
+            source = profile.get('_source', {})
+            description = (source.get('description') or '').strip()
+            
+            # Traiter les réseaux sociaux
+            socials = source.get('socials', [])
+            social_tags = self._extract_social_tags(socials)
+            
+            if description:
+                import hashlib
+                description_hash = hashlib.md5(description.encode()).hexdigest()
+                cache_key = f"thematic_{description_hash}"
+                
+                if cache_key in thematic_cache:
+                    thematic_tags = thematic_cache[cache_key]
+                else:
+                    ia_batch.append({
+                        'pubkey': pubkey,
+                        'description': description,
+                        'uid': prospect_data.get('uid', 'N/A'),
+                        'cache_key': cache_key
+                    })
+                    
+                    if len(ia_batch) >= batch_size or i == len(prospects_with_description) - 1:
+                        processed = self._process_ia_batch(ia_batch, thematic_cache, prompt_template, guide_tags)
+                        self._save_thematic_cache(thematic_cache, thematic_cache_file)
+                        ia_batch = []
+                
+                if cache_key in thematic_cache:
+                    thematic_tags = thematic_cache[cache_key]
+                    all_tags = social_tags + thematic_tags
+                    normalized_tags = self._normalize_tags(all_tags)
+                    metadata['tags'] = normalized_tags
+                    tags_generated += len(normalized_tags)
+            else:
+                metadata['tags'] = social_tags
+                tags_generated += len(social_tags)
+        
+        return {'tags_generated': tags_generated}
+
+    def _run_optimized_ia_analysis(self, knowledge_base, all_prospects, geo_prompt_template):
+        """Analyse IA pour les cas restants"""
+        ia_analyzed = 0
+        
+        for pubkey in all_prospects:
+            prospect_data = knowledge_base[pubkey]
+            
+            # Vérifier si déjà analysé
+            if 'language' in prospect_data.get('metadata', {}):
+                continue
+            
+            profile = prospect_data.get('profile', {})
+            source = profile.get('_source', {})
+            description = (source.get('description') or '').strip()
+            
+            if description:
+                try:
+                    prompt = f"{geo_prompt_template}\n\nTexte fourni: \"{description}\""
+                    ia_response = self._query_ia(prompt, expect_json=True)
+                    cleaned_answer = self._clean_ia_json_output(ia_response['answer'])
+                    geo_data = json.loads(cleaned_answer)
+                    
+                    self._apply_geo_data(prospect_data, geo_data)
+                    ia_analyzed += 1
+                    
+                except Exception as e:
+                    self.logger.error(f"❌ Erreur analyse IA pour {prospect_data.get('uid')} : {e}")
+        
+        return {'ia_analyzed': ia_analyzed}
+
+    def _apply_geo_data(self, prospect_data, geo_data):
+        """Applique les données géolocalisées à un prospect"""
+        meta = prospect_data.setdefault('metadata', {})
+        
+        language = geo_data.get('language', 'xx')
+        if language != 'xx':
+            meta['language'] = language
+        
+        country = geo_data.get('country')
+        if country:
+            meta['country'] = country
+        
+        region = geo_data.get('region')
+        if region:
+            meta['region'] = region
+        
+        city = geo_data.get('city')
+        if city:
+            meta['city'] = city
+        
+        meta['geolocation_source'] = geo_data.get('geolocation_source', 'unknown')
+
+    def _extract_social_tags(self, socials):
+        """Extrait les tags des réseaux sociaux"""
+        social_tags = []
+        social_mapping = {
+            'web': 'website', 'facebook': 'facebook', 'email': 'email',
+            'instagram': 'instagram', 'youtube': 'youtube', 'twitter': 'twitter',
+            'diaspora': 'diaspora', 'linkedin': 'linkedin', 'github': 'github',
+            'phone': 'phone', 'vimeo': 'vimeo'
+        }
+        
+        for social in socials:
+            social_type = social.get('type', '').lower()
+            if social_type:
+                normalized_type = social_mapping.get(social_type, social_type)
+                if normalized_type not in social_tags:
+                    social_tags.append(normalized_type)
+        
+        return social_tags
+
+    def _normalize_tags(self, tags):
+        """Normalise et déduplique une liste de tags"""
+        normalized_tags = []
+        for tag in tags:
+            normalized = self._normalize_tag(tag)
+            if normalized and normalized not in normalized_tags:
+                normalized_tags.append(normalized)
+        return normalized_tags
 

@@ -228,6 +228,20 @@ class AstroBotOrchestrator:
             self.logger.info("📦 Workspace: Un message est prêt à être envoyé.")
         else:
             self.logger.info("📦 Workspace: Aucun message à envoyer.")
+        
+        # Afficher les statistiques enrichies si disponibles
+        try:
+            progress = self.agents['analyste'].get_analysis_progress()
+            if progress.get('linked_accounts', 0) > 0:
+                self.logger.info(f"🔗 Base enrichie: {progress.get('linked_accounts', 0)} comptes liés détectés")
+            
+            import_sources = progress.get('import_sources', {})
+            if import_sources:
+                sources_str = ", ".join([f"{k}({v})" for k, v in import_sources.items()])
+                self.logger.info(f"📥 Sources d'import: {sources_str}")
+        except Exception as e:
+            self.logger.debug(f"Impossible d'afficher les statistiques enrichies: {e}")
+        
         self.logger.info("-" * 37)
 
 
@@ -314,22 +328,19 @@ class AstroBotOrchestrator:
         print(f"Statut de la base de connaissance : {total} profils au total.\n")
         
         print("🚀 INITIALISATION ET ANALYSE :")
-        print(f"1. 🌍 Analyse Géo-Linguistique         ({lang_total} / {gps_prospects} profils avec GPS)")
-        print(f"2. 🏷️ Analyse par Thèmes (Compétences, etc.) ({tags_total} / {total} profils analysés)")
-        
-        print("\n🔧 PERSONA - RAFFINAGE ET OPTIMISATION :")
-        print("3. 🎭 Créer Banques persona (5-9) automatiquement selon les Thèmes détectés")
-        print("4. 🌍 Ajouter Traductions Banque(s) persona (au choix, 1, 3, ou 0-3)")
-        print("5. 🔄 Optimiser les Thèmes (recalculer le Top 50)")
-        print("6. 🧪 Mode Test (cible unique pour validation)")
-        
-        print("\n🎯 CIBLAGE ET EXPORT :")
-        print("7. 🎯 Ciblage Avancé Multi-Sélection (Thèmes + Filtres)")
-        print("8. 🌍 Cibler par Langue")
-        print("9. 🌍 Cibler par Pays")
-        print("10. 🌍 Cibler par Région")
-        print("11. 📊 Lancer une campagne à partir d'un Thème")
-        print("12. ↩️  Retour")
+        print("1. 🌍 Analyse Géo-Linguistique         (5008 / 4811 profils avec GPS)")
+        print("2. 🏷️ Analyse par Thèmes (Compétences, etc.) (8264 / 8342 profils analysés)")
+        print("3. 🚀 Suite d'Analyse Optimisée (Géo + Thèmes)")
+        print("4. 🎯 Ciblage Avancé Multi-Sélection (Thèmes + Filtres)")
+        print("5. 🌍 Cibler par Langue")
+        print("6. 🌍 Cibler par Pays")
+        print("7. 🌍 Cibler par Région")
+        print("8. 📊 Lancer une campagne à partir d'un Thème")
+        print("9. 🔗 Cibler par Comptes Liés (Cesium-Gchange)")
+        print("10. 🛒 Cibler par Comptes Gchange")
+        print("11. 📈 Afficher Statistiques Enrichies")
+        print("12. 🧪 Mode Test")
+        print("13. ↩️  Retour")
         
         choice = input("> ")
         
@@ -338,44 +349,57 @@ class AstroBotOrchestrator:
         elif choice == "2":
             self.agents['analyste'].run_thematic_analysis()
         elif choice == "3":
-            self.agents['analyste'].create_automatic_personas()
+            self.agents['analyste'].run_optimized_analysis_suite()
+            return "continue"
         elif choice == "4":
-            self.agents['analyste'].translate_persona_bank()
-        elif choice == "5":
-            self.agents['analyste'].optimize_thematic_analysis()
-        elif choice == "6":
-            self.agents['analyste'].run_test_mode()
-        elif choice == "7":
             result = self.agents['analyste'].advanced_multi_selection_targeting()
             if result == "continue":
                 return "continue"
             elif result == "quit":
                 return "quit"
-        elif choice == "8":
+        elif choice == "5":
             result = self.agents['analyste'].select_cluster_by_language()
             if result == "continue":
                 return "continue"
             elif result == "quit":
                 return "quit"
-        elif choice == "9":
+        elif choice == "6":
             result = self.agents['analyste'].select_cluster_by_country()
             if result == "continue":
                 return "continue"
             elif result == "quit":
                 return "quit"
-        elif choice == "10":
+        elif choice == "7":
             result = self.agents['analyste'].select_cluster_by_region()
             if result == "continue":
                 return "continue"
             elif result == "quit":
                 return "quit"
-        elif choice == "11":
+        elif choice == "8":
             result = self.agents['analyste'].select_cluster_from_tags()
             if result == "continue":
                 return "continue"
             elif result == "quit":
                 return "quit"
+        elif choice == "9":
+            result = self.agents['analyste'].select_cluster_by_linked_accounts()
+            if result == "continue":
+                return "continue"
+            elif result == "quit":
+                return "quit"
+        elif choice == "10":
+            result = self.agents['analyste'].select_cluster_by_gchange()
+            if result == "continue":
+                return "continue"
+            elif result == "quit":
+                return "quit"
+        elif choice == "11":
+            self.agents['analyste'].display_enhanced_statistics()
+            return "continue"
         elif choice == "12":
+            self.agents['analyste'].run_test_mode()
+            return "continue"
+        elif choice == "13":
             return
         else:
             self.logger.warning("Choix invalide.")

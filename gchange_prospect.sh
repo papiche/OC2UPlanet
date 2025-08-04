@@ -33,6 +33,21 @@ trap cleanup_on_exit INT TERM
 
 # --- Functions ---
 
+# Function to display progress
+show_progress() {
+    local current=$1
+    local total=$2
+    local percentage=$((current * 100 / total))
+    local bar_length=50
+    local filled=$((current * bar_length / total))
+    local empty=$((bar_length - filled))
+    
+    printf "\r["
+    printf "%${filled}s" | tr ' ' '#'
+    printf "%${empty}s" | tr ' ' '-'
+    printf "] %d%% (%d/%d)" "$percentage" "$current" "$total"
+}
+
 # Create necessary directories
 mkdir -p "$(dirname "$PROSPECT_FILE")"
 mkdir -p "$TEMP_DIR"
@@ -87,6 +102,7 @@ fetch_ad_metadata() {
 # Enrich the g1prospect.json file if a new Cesium pubkey is found
 enrich_g1_database() {
     local cesium_pubkey=$1
+    local gchange_uid=$2  # Add Gchange UID parameter
     echo "    -> Found linked Cesium account: $cesium_pubkey"
 
     # Ensure G1 prospect file exists
@@ -100,55 +116,103 @@ enrich_g1_database() {
 EOF
     fi
 
-    # Check if this pubkey is already in the G1 database
-    if ! jq -e --arg pk "$cesium_pubkey" '.members[] | select(.pubkey == $pk)' "$G1_PROSPECT_FILE" >/dev/null 2>&1; then
-        echo "    -> Pubkey not in G1 database. Adding it..."
+    # Create lookup table of existing G1 pubkeys (much faster than checking one by one)
+    local g1_pubkeys_file="$TEMP_DIR/g1_existing_pubkeys.txt"
+    if [[ ! -f "$g1_pubkeys_file" ]]; then
+        jq -r '.members[].pubkey' "$G1_PROSPECT_FILE" 2>/dev/null | sort > "$g1_pubkeys_file" || touch "$g1_pubkeys_file"
+    fi
+    
+    # Check if this pubkey is already in the G1 database using grep
+    if grep -q "^$cesium_pubkey$" "$g1_pubkeys_file" 2>/dev/null; then
+        echo "    -> Cesium account already in G1 database. Updating with Gchange information..."
+        
+        # Update the existing member with Gchange information
+        jq --arg pubkey "$cesium_pubkey" \
+           --arg gchange_uid "$gchange_uid" \
+           --arg update_date "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+           '( .members[] | select(.pubkey == $pubkey) | .linked_accounts ) |= if . == null then { "gchange_uid": $gchange_uid } else . + { "gchange_uid": $gchange_uid } end
+            | ( .members[] | select(.pubkey == $pubkey) | .import_metadata ) |= if . == null then { "last_gchange_update": $update_date } else . + { "last_gchange_update": $update_date } end
+            | .metadata.updated_date = $update_date' "$G1_PROSPECT_FILE" > "$G1_PROSPECT_FILE.new"
+        mv "$G1_PROSPECT_FILE.new" "$G1_PROSPECT_FILE"
+        
+        echo "    -> Successfully updated existing Cesium account with Gchange UID: $gchange_uid"
+        return
+    fi
+    
+    echo "    -> Pubkey not in G1 database. Adding it..."
 
-        # Find the corresponding UID from the WoT data
-        local wot_file="$TEMP_DIR/g1_wot_data.json"
-        local cesium_uid
-        cesium_uid=$(jq -r --arg pk "$cesium_pubkey" '.results[] | select(.pubkey == $pk) | .uid' "$wot_file")
+    # Find the corresponding UID from the WoT data
+    local wot_file="$TEMP_DIR/g1_wot_data.json"
+    local cesium_uid
+    cesium_uid=$(jq -r --arg pk "$cesium_pubkey" '.results[] | select(.pubkey == $pk) | .uid' "$wot_file")
 
-        # Fetch the full Cesium profile regardless of WoT status
-        local cesium_profile_url="$CESIUM_API/user/profile/$cesium_pubkey?_source_exclude=avatar._content"
-        local cesium_profile_data
-        cesium_profile_data=$(curl -sk "$cesium_profile_url" | jq -c '._source' || echo "{}")
-
-        if [[ -z "$cesium_uid" ]]; then
-            echo "    -> UID not found in WoT. Treating as a non-member wallet."
-            
-            # Use the profile's title as a fallback UID
-            local cesium_uid_fallback
-            cesium_uid_fallback=$(echo "$cesium_profile_data" | jq -r '.title // "(Wallet User)"')
-            
-            # Create and save the new G1 member from a non-WoT source
-            local new_g1_member
-            new_g1_member=$(jq -n \
-              --arg pubkey "$cesium_pubkey" \
-              --arg uid "$cesium_uid_fallback" \
-              --arg added_date "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
-              --argjson profile "$cesium_profile_data" \
-              '{ "pubkey": $pubkey, "uid": $uid, "added_date": $added_date, "profile": $profile, "source": "g1_wallet_discovered_via_gchange" }')
-
-            jq --argjson member "$new_g1_member" '.members += [$member]' "$G1_PROSPECT_FILE" > "$G1_PROSPECT_FILE.new"
-            mv "$G1_PROSPECT_FILE.new" "$G1_PROSPECT_FILE"
-            echo "    -> Successfully added $cesium_uid_fallback ($cesium_pubkey) to G1 prospect database."
-        else
-            # This is a certified member from the WoT
-            local new_g1_member
-            new_g1_member=$(jq -n \
-              --arg pubkey "$cesium_pubkey" \
-              --arg uid "$cesium_uid" \
-              --arg added_date "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
-              --argjson profile "$cesium_profile_data" \
-              '{ "pubkey": $pubkey, "uid": $uid, "added_date": $added_date, "profile": $profile, "source": "g1_wot_discovered_via_gchange" }')
-
-            jq --argjson member "$new_g1_member" '.members += [$member]' "$G1_PROSPECT_FILE" > "$G1_PROSPECT_FILE.new"
-            mv "$G1_PROSPECT_FILE.new" "$G1_PROSPECT_FILE"
-            echo "    -> Successfully added $cesium_uid ($cesium_pubkey) to G1 prospect database."
-        fi
+    # Fetch the full Cesium profile with cache
+    local cesium_cache_dir="$TEMP_DIR/coucou"
+    local cesium_profile_file="$cesium_cache_dir/$cesium_pubkey.cesium.json"
+    local cesium_profile_data
+    
+    if [[ -f "$cesium_profile_file" ]]; then
+        echo "    -> Using cached Cesium profile data for $cesium_pubkey"
+        cesium_profile_data=$(cat "$cesium_profile_file")
     else
-        echo "    -> Cesium account already in G1 database. Nothing to do."
+        local cesium_profile_url="$CESIUM_API/user/profile/$cesium_pubkey?_source_exclude=avatar._content"
+        echo "    -> Fetching Cesium profile from: $cesium_profile_url"
+        cesium_profile_data=$(curl -sk "$cesium_profile_url" | jq -c '._source' || echo "{}")
+        
+        # Cache the profile data
+        echo "$cesium_profile_data" > "$cesium_profile_file"
+    fi
+
+    if [[ -z "$cesium_uid" ]]; then
+        echo "    -> UID not found in WoT. Treating as a non-member wallet."
+        
+        # Use the profile's title as a fallback UID
+        local cesium_uid_fallback
+        cesium_uid_fallback=$(echo "$cesium_profile_data" | jq -r '.title // "(Wallet User)"')
+        
+        # Create and save the new G1 member from a non-WoT source
+        local new_g1_member
+        new_g1_member=$(jq -n \
+          --arg pubkey "$cesium_pubkey" \
+          --arg uid "$cesium_uid_fallback" \
+          --arg added_date "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+          --argjson profile "$cesium_profile_data" \
+          --arg import_source "gchange_prospect.sh" \
+          --arg import_date "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+          --arg gchange_uid "$gchange_uid" \
+          '{ "pubkey": $pubkey, "uid": $uid, "added_date": $added_date, "profile": $profile, "source": "g1_wallet_discovered_via_gchange", "import_metadata": { "source_script": $import_source, "import_date": $import_date, "discovery_method": "cesium_linked_account" }, "linked_accounts": { "gchange_uid": $gchange_uid } }')
+
+        jq --argjson member "$new_g1_member" '.members += [$member]' "$G1_PROSPECT_FILE" > "$G1_PROSPECT_FILE.new"
+        mv "$G1_PROSPECT_FILE.new" "$G1_PROSPECT_FILE"
+        
+        # Update the lookup table
+        echo "$cesium_pubkey" >> "$g1_pubkeys_file"
+        sort -u "$g1_pubkeys_file" > "$g1_pubkeys_file.tmp"
+        mv "$g1_pubkeys_file.tmp" "$g1_pubkeys_file"
+        
+        echo "    -> Successfully added $cesium_uid_fallback ($cesium_pubkey) to G1 prospect database."
+    else
+        # This is a certified member from the WoT
+        local new_g1_member
+        new_g1_member=$(jq -n \
+          --arg pubkey "$cesium_pubkey" \
+          --arg uid "$cesium_uid" \
+          --arg added_date "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+          --argjson profile "$cesium_profile_data" \
+          --arg import_source "gchange_prospect.sh" \
+          --arg import_date "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+          --arg gchange_uid "$gchange_uid" \
+          '{ "pubkey": $pubkey, "uid": $uid, "added_date": $added_date, "profile": $profile, "source": "g1_wot_discovered_via_gchange", "import_metadata": { "source_script": $import_source, "import_date": $import_date, "discovery_method": "cesium_linked_account" }, "linked_accounts": { "gchange_uid": $gchange_uid } }')
+
+        jq --argjson member "$new_g1_member" '.members += [$member]' "$G1_PROSPECT_FILE" > "$G1_PROSPECT_FILE.new"
+        mv "$G1_PROSPECT_FILE.new" "$G1_PROSPECT_FILE"
+        
+        # Update the lookup table
+        echo "$cesium_pubkey" >> "$g1_pubkeys_file"
+        sort -u "$g1_pubkeys_file" > "$g1_pubkeys_file.tmp"
+        mv "$g1_pubkeys_file.tmp" "$g1_pubkeys_file"
+        
+        echo "    -> Successfully added $cesium_uid ($cesium_pubkey) to G1 prospect database."
     fi
 }
 
@@ -175,6 +239,29 @@ process_ads_incrementally() {
 EOF
     fi
 
+    # Create lookup table of existing UIDs (much faster than checking one by one)
+    echo "Creating lookup table of existing UIDs..."
+    jq -r '.members[].uid' "$PROSPECT_FILE" 2>/dev/null | sort > "$TEMP_DIR/existing_uids.txt" || touch "$TEMP_DIR/existing_uids.txt"
+    
+    # Create cache directory for Gchange profile data
+    local cache_dir="$TEMP_DIR/coucou"
+    mkdir -p "$cache_dir"
+    
+    # Show existing cache statistics
+    local existing_cache_count
+    existing_cache_count=$(find "$cache_dir" -name "*.gchange.json" 2>/dev/null | wc -l)
+    echo "Found $existing_cache_count existing Gchange cache files"
+    
+    # Create temporary files for batch processing
+    local temp_new_members="$TEMP_DIR/new_gchange_members.json"
+    local temp_updates="$TEMP_DIR/gchange_updates.json"
+    echo "[]" > "$temp_new_members"
+    echo "[]" > "$temp_updates"
+    
+    # Batch processing variables
+    local batch_size=50
+    local current_batch=0
+
     local total_ads
     total_ads=$(jq 'length' < "$metadata_file")
     local processed_ads=0
@@ -182,6 +269,13 @@ EOF
 
     while IFS= read -r ad_meta; do
         processed_ads=$((processed_ads + 1))
+        
+        # Show progress every 100 ads or for the last ad
+        if [[ $((processed_ads % 100)) -eq 0 ]] || [[ $processed_ads -eq $total_ads ]]; then
+            show_progress "$processed_ads" "$total_ads"
+            echo ""
+        fi
+        
         local user_id
         user_id=$(echo "$ad_meta" | jq -r '._source.issuer | select(. != null)')
         local ad_id
@@ -194,40 +288,74 @@ EOF
             continue
         fi
         
-        # Check if user exists in the main gchange database
-        if jq -e --arg uid "$user_id" '.members[] | select(.uid == $uid)' "$PROSPECT_FILE" >/dev/null 2>&1; then
+        # Check if user exists using grep (much faster than jq)
+        if grep -q "^$user_id$" "$TEMP_DIR/existing_uids.txt" 2>/dev/null; then
             # --- EXISTING GCHANGE USER ---
             echo " -> User $user_id already in gchange database. Checking for new activity..."
             
-            # Activity 1: Check for new ad
-            if jq -e --arg ad_id "$ad_id" --arg uid "$user_id" '([.members[] | select(.uid == $uid) | .detected_ads[]?] | index($ad_id)) == null' "$PROSPECT_FILE" >/dev/null; then
+            # Activity 1: Check for new ad (simplified check)
+            local user_ads_file="$TEMP_DIR/user_${user_id}_ads.json"
+            if [[ ! -f "$user_ads_file" ]]; then
+                # Extract user's ads once
+                jq -r --arg uid "$user_id" '.members[] | select(.uid == $uid) | .detected_ads[]?' "$PROSPECT_FILE" > "$user_ads_file" 2>/dev/null || touch "$user_ads_file"
+            fi
+            
+            if ! grep -q "^$ad_id$" "$user_ads_file" 2>/dev/null; then
                 echo "    -> New ad $ad_id found. Adding to detected_ads."
-                jq --arg ad_id "$ad_id" --arg uid "$user_id" '
-                    ( .members[] | select(.uid == $uid) | .detected_ads ) |= if . == null then [$ad_id] else . + [$ad_id] end
-                    | .metadata.updated_date = "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'"
-                ' "$PROSPECT_FILE" > "$PROSPECT_FILE.new"
-                mv "$PROSPECT_FILE.new" "$PROSPECT_FILE"
+                echo "$ad_id" >> "$user_ads_file"
+                
+                # Queue update for batch processing
+                local update_entry
+                update_entry=$(jq -n --arg ad_id "$ad_id" --arg uid "$user_id" '{ "type": "add_ad", "uid": $uid, "ad_id": $ad_id }')
+                jq --argjson entry "$update_entry" '. += [$entry]' "$temp_updates" > "$temp_updates.tmp"
+                mv "$temp_updates.tmp" "$temp_updates"
             else
                 echo "    -> Ad $ad_id already listed."
             fi
 
             # Activity 2: Check for linked Cesium account and enrich G1 database
-            local existing_profile
-            existing_profile=$(jq -c --arg uid "$user_id" '.members[] | select(.uid == $uid) | .profile' "$PROSPECT_FILE")
-            local cesium_pubkey
-            cesium_pubkey=$(echo "$existing_profile" | jq -r '.pubkey | select(. != null)')
-            if [[ -n "$cesium_pubkey" ]]; then
-                enrich_g1_database "$cesium_pubkey"
+            local user_profile_file="$cache_dir/${user_id}.gchange.json"
+            if [[ -f "$user_profile_file" ]]; then
+                local cesium_pubkey
+                cesium_pubkey=$(jq -r '.pubkey | select(. != null)' "$user_profile_file")
+                if [[ -n "$cesium_pubkey" ]]; then
+                    enrich_g1_database "$cesium_pubkey" "$user_id"
+                    
+                    # Update linked accounts in the main database
+                    echo "    -> Updating linked accounts information..."
+                    jq --arg uid "$user_id" --arg cesium_pubkey "$cesium_pubkey" '
+                        ( .members[] | select(.uid == $uid) | .linked_accounts ) |= if . == null then { "cesium_pubkey": $cesium_pubkey } else . + { "cesium_pubkey": $cesium_pubkey } end
+                    ' "$PROSPECT_FILE" > "$PROSPECT_FILE.tmp"
+                    mv "$PROSPECT_FILE.tmp" "$PROSPECT_FILE"
+                fi
             fi
         else
             # --- NEW GCHANGE USER ---
             echo " -> New user found: $user_id"
             
-            # 1. Fetch gchange profile
+            # 1. Fetch gchange profile (with cache)
             echo "    -> Fetching profile for user $user_id..."
-            local user_api_url="$GCHANGE_USER_API_TPL/$user_id?_source_exclude=avatar._content"
+            local user_profile_file="$cache_dir/${user_id}.gchange.json"
             local profile_data
-            profile_data=$(curl -sk "$user_api_url" | jq -c '._source' || echo "{}")
+            
+            if [[ -f "$user_profile_file" ]]; then
+                echo "    -> Using cached profile data for $user_id"
+                profile_data=$(cat "$user_profile_file")
+            else
+                local user_api_url="$GCHANGE_USER_API_TPL/$user_id?_source_exclude=avatar._content"
+                profile_data=$(curl -sk "$user_api_url" | jq -c '._source' || echo "{}")
+                
+                # Cache the profile data
+                echo "$profile_data" > "$user_profile_file"
+            fi
+
+            # Extract Cesium pubkey from Gchange profile if available
+            local cesium_pubkey_from_gchange
+            cesium_pubkey_from_gchange=$(echo "$profile_data" | jq -r '.pubkey | select(. != null and . != "")')
+            
+            if [[ -n "$cesium_pubkey_from_gchange" ]]; then
+                echo "    -> Found linked Cesium account in Gchange profile: $cesium_pubkey_from_gchange"
+            fi
 
             # 2. Fetch full ad data
             echo "    -> Fetching full details for ad $ad_id (excluding images)..."
@@ -243,8 +371,8 @@ EOF
                 continue
             fi
             
-            # 3. Create and save the new gchange member
-            echo "    -> Saving to gchange database..."
+            # 3. Create new member for batch processing
+            echo "    -> Queuing for batch addition..."
             local new_member
             new_member=$(jq -n \
               --arg uid "$user_id" \
@@ -252,28 +380,73 @@ EOF
               --arg added_date "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
               --argjson profile "$profile_data" \
               --argjson source_ad "$source_ad" \
-              '{ "uid": $uid, "added_date": $added_date, "profile": $profile, "source": "gchange", "discovery_ad": $source_ad, "detected_ads": [$ad_id] }')
+              --arg import_source "gchange_prospect.sh" \
+              --arg import_date "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+              --arg cesium_pubkey "$cesium_pubkey_from_gchange" \
+              '{ "uid": $uid, "added_date": $added_date, "profile": $profile, "source": "gchange", "discovery_ad": $source_ad, "detected_ads": [$ad_id], "import_metadata": { "source_script": $import_source, "import_date": $import_date, "discovery_method": "ad_issuer" }, "linked_accounts": { "cesium_pubkey": $cesium_pubkey } }')
             
-            jq --argjson member "$new_member" '.members += [$member]' "$PROSPECT_FILE" > "$PROSPECT_FILE.new"
-            mv "$PROSPECT_FILE.new" "$PROSPECT_FILE"
+            jq --argjson member "$new_member" '. += [$member]' "$temp_new_members" > "$temp_new_members.tmp"
+            mv "$temp_new_members.tmp" "$temp_new_members"
             
             new_members=$((new_members + 1))
+            current_batch=$((current_batch + 1))
 
             # 4. Check for linked Cesium account and enrich G1 database
             local cesium_pubkey_new
             cesium_pubkey_new=$(echo "$profile_data" | jq -r '.pubkey | select(. != null)')
             if [[ -n "$cesium_pubkey_new" ]]; then
-                enrich_g1_database "$cesium_pubkey_new"
+                enrich_g1_database "$cesium_pubkey_new" "$user_id"
             fi
             echo "    -> Done."
+            
+            # Process batch when it reaches the batch size
+            if [[ $current_batch -ge $batch_size ]]; then
+                echo "Processing batch of $current_batch new members..."
+                jq --argjson new_members "$(cat "$temp_new_members")" '.members += $new_members' "$PROSPECT_FILE" > "$PROSPECT_FILE.new"
+                mv "$PROSPECT_FILE.new" "$PROSPECT_FILE"
+                
+                # Reset batch
+                echo "[]" > "$temp_new_members"
+                current_batch=0
+                echo "Batch processed successfully"
+            fi
         fi
     done < <(jq -c '.[]' "$metadata_file")
+    
+    # Process remaining new members in the last batch
+    if [[ $current_batch -gt 0 ]]; then
+        echo "Processing final batch of $current_batch new members..."
+        jq --argjson new_members "$(cat "$temp_new_members")" '.members += $new_members' "$PROSPECT_FILE" > "$PROSPECT_FILE.new"
+        mv "$PROSPECT_FILE.new" "$PROSPECT_FILE"
+        echo "Final batch processed successfully"
+    fi
+    
+    # Process all updates in batch
+    local updates_count
+    updates_count=$(jq 'length' "$temp_updates")
+    if [[ $updates_count -gt 0 ]]; then
+        echo "Processing $updates_count updates in batch..."
+        
+        # Apply all updates at once
+        jq -r '.[] | select(.type == "add_ad") | "\(.uid)|\(.ad_id)"' "$temp_updates" | while IFS='|' read -r uid ad_id; do
+            jq --arg ad_id "$ad_id" --arg uid "$uid" '
+                ( .members[] | select(.uid == $uid) | .detected_ads ) |= if . == null then [$ad_id] else . + [$ad_id] end
+            ' "$PROSPECT_FILE" > "$PROSPECT_FILE.tmp"
+            mv "$PROSPECT_FILE.tmp" "$PROSPECT_FILE"
+        done
+        echo "Updates processed successfully"
+    fi
     
     # Final metadata update for gchange file
     local final_count
     final_count=$(jq '.members | length' "$PROSPECT_FILE")
     jq '.metadata.updated_date = "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'" | .metadata.total_members = ('$final_count')' "$PROSPECT_FILE" > "$PROSPECT_FILE.new"
     mv "$PROSPECT_FILE.new" "$PROSPECT_FILE"
+    
+    # Clean up temporary files
+    rm -f "$temp_new_members" "$temp_updates" "$TEMP_DIR/existing_uids.txt" "$TEMP_DIR"/user_*_ads.json "$TEMP_DIR/g1_existing_pubkeys.txt"
+    
+    # Note: Cache files in $cache_dir are preserved for future use
     
     echo "Processing complete."
     if [[ $new_members -gt 0 ]]; then
@@ -282,6 +455,11 @@ EOF
         echo "No new gchange users were found, but existing users may have been updated."
     fi
     echo "Total members in gchange database: $final_count"
+    
+    # Show cache statistics
+    local cache_files_count
+    cache_files_count=$(find "$cache_dir" -name "*.gchange.json" 2>/dev/null | wc -l)
+    echo "Gchange cache files: $cache_files_count (preserved in $cache_dir)"
 }
 
 # Shows statistics about the created database
@@ -300,6 +478,47 @@ show_statistics() {
     echo "Total members: $total_members"
     echo "Last updated: $updated_date"
     echo "Database file: $PROSPECT_FILE"
+    
+    # Show provenance statistics
+    echo ""
+    echo "=== Import Provenance Statistics ==="
+    local gchange_count
+    local unknown_count
+    
+    gchange_count=$(jq -r '.members[] | select(.import_metadata.source_script == "gchange_prospect.sh") | .uid' "$PROSPECT_FILE" 2>/dev/null | wc -l)
+    unknown_count=$(jq -r '.members[] | select(.import_metadata.source_script == null) | .uid' "$PROSPECT_FILE" 2>/dev/null | wc -l)
+    
+    echo "Imported by gchange_prospect.sh: $gchange_count"
+    echo "Unknown provenance: $unknown_count"
+    
+    # Show discovery method statistics
+    echo ""
+    echo "=== Discovery Method Statistics ==="
+    local ad_issuer_count
+    local cesium_linked_count
+    
+    ad_issuer_count=$(jq -r '.members[] | select(.import_metadata.discovery_method == "ad_issuer") | .uid' "$PROSPECT_FILE" 2>/dev/null | wc -l)
+    cesium_linked_count=$(jq -r '.members[] | select(.import_metadata.discovery_method == "cesium_linked_account") | .uid' "$PROSPECT_FILE" 2>/dev/null | wc -l)
+    
+    echo "Discovered via ad issuer: $ad_issuer_count"
+    echo "Discovered via Cesium linked account: $cesium_linked_count"
+    
+    # Show linked accounts statistics
+    echo ""
+    echo "=== Linked Accounts Statistics ==="
+    local linked_cesium_count
+    local total_linked_count
+    
+    linked_cesium_count=$(jq -r '.members[] | select(.linked_accounts.cesium_pubkey != null and .linked_accounts.cesium_pubkey != "") | .uid' "$PROSPECT_FILE" 2>/dev/null | wc -l)
+    total_linked_count=$(jq -r '.members[] | select(.linked_accounts != null) | .uid' "$PROSPECT_FILE" 2>/dev/null | wc -l)
+    
+    echo "Users with linked Cesium accounts: $linked_cesium_count"
+    echo "Total users with any linked accounts: $total_linked_count"
+    
+    # Show sample of linked accounts
+    echo ""
+    echo "=== Sample Linked Accounts ==="
+    jq -r '.members[] | select(.linked_accounts.cesium_pubkey != null and .linked_accounts.cesium_pubkey != "") | "\(.uid) -> Cesium: \(.linked_accounts.cesium_pubkey)"' "$PROSPECT_FILE" 2>/dev/null | head -5 || echo "No linked accounts found"
 }
 
 # --- Main Execution ---
