@@ -1,15 +1,61 @@
 #!/bin/bash
 ########################################################################
 # Gchange Prospect Database Builder
-# Version: 0.2 - Cross-Enrichment Edition
+# Version: 0.3 - Cross-Enrichment Edition with Time/Size Control
 # License: AGPL-3.0
 ########################################################################
 # Fetches gchange users and enriches their profiles.
 # If a linked Cesium account (pubkey) is found, it also enriches
 # the g1prospect.json database.
+#
+# Usage: ./gchange_prospect.sh [OPTIONS]
+# Options:
+#   -n, --num-ads NUM     Number of ads to process (default: 1000)
+#   -d, --days DAYS       Process ads from last N days (default: all)
+#   -h, --help           Show this help message
 ########################################################################
 
 set -euo pipefail
+
+# --- Default Configuration ---
+DEFAULT_NUM_ADS=1000
+DEFAULT_DAYS=""
+
+# --- Parse command line arguments ---
+NUM_ADS="$DEFAULT_NUM_ADS"
+DAYS="$DEFAULT_DAYS"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -n|--num-ads)
+            NUM_ADS="$2"
+            shift 2
+            ;;
+        -d|--days)
+            DAYS="$2"
+            shift 2
+            ;;
+        -h|--help)
+            echo "Usage: $0 [OPTIONS]"
+            echo "Options:"
+            echo "  -n, --num-ads NUM     Number of ads to process (default: $DEFAULT_NUM_ADS)"
+            echo "  -d, --days DAYS       Process ads from last N days (default: all)"
+            echo "  -h, --help           Show this help message"
+            echo ""
+            echo "Examples:"
+            echo "  $0                    # Process latest 1000 ads"
+            echo "  $0 -n 500            # Process latest 500 ads"
+            echo "  $0 -d 7              # Process ads from last 7 days"
+            echo "  $0 -n 200 -d 3       # Process latest 200 ads from last 3 days"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Use -h or --help for usage information"
+            exit 1
+            ;;
+    esac
+done
 
 # --- Configuration ---
 PROSPECT_FILE="$HOME/.zen/game/gchange_prospect.json"
@@ -78,20 +124,72 @@ fetch_g1_wot_data() {
     fi
 }
 
-# Fetches lightweight metadata for the latest ads to identify potential new users
+# Fetches lightweight metadata for ads with configurable size and time period
 fetch_ad_metadata() {
     local metadata_file="$TEMP_DIR/gchange_ad_metadata.json"
-    echo "Fetching metadata for the latest 1000 ads..."
+    local cache_key="ads_${NUM_ADS}"
+    if [[ -n "$DAYS" ]]; then
+        cache_key="${cache_key}_days${DAYS}"
+    fi
+    local cache_file="$TEMP_DIR/gchange_ad_metadata_${cache_key}.json"
+    
+    # Check if we have cached data for this specific query
+    if [[ -f "$cache_file" ]]; then
+        local now
+        now=$(date +%s)
+        local file_mod_time
+        file_mod_time=$(stat -c %Y "$cache_file")
+        # Cache for 30 minutes for time-based queries, 1 hour for size-only queries
+        local cache_duration=3600
+        if [[ -n "$DAYS" ]]; then
+            cache_duration=1800
+        fi
+        if (( (now - file_mod_time) < cache_duration )); then
+            echo "Using cached ad metadata for ${NUM_ADS} ads${DAYS:+ from last ${DAYS} days} (less than $((cache_duration/60)) minutes old)."
+            cp "$cache_file" "$metadata_file"
+            return
+        fi
+    fi
+    
+    # Build query based on parameters
+    local query
+    if [[ -n "$DAYS" ]]; then
+        local cutoff_timestamp
+        cutoff_timestamp=$(date -d "$DAYS days ago" -u +%s)
+        local cutoff_date
+        cutoff_date=$(date -d "$DAYS days ago" -u +"%Y-%m-%dT%H:%M:%SZ")
+        echo "Fetching metadata for the latest ${NUM_ADS} ads from last ${DAYS} days (since $cutoff_date)..."
+        query=$(jq -n \
+            --arg size "$NUM_ADS" \
+            --arg cutoff "$cutoff_timestamp" \
+            '{ "size": ($size | tonumber), "query": { "range": { "time": { "gte": ($cutoff | tonumber) } } }, "_source": ["issuer", "time", "title"], "sort": [{ "time": { "order": "desc" } }] }')
+    else
+        echo "Fetching metadata for the latest ${NUM_ADS} ads..."
+        query=$(jq -n \
+            --arg size "$NUM_ADS" \
+            '{ "size": ($size | tonumber), "query": { "match_all": {} }, "_source": ["issuer", "title"], "sort": [{ "time": { "order": "desc" } }] }')
+    fi
+    
     echo "(This is a quick, lightweight query to identify new users...)"
 
-    # We only fetch the ad's ID and its issuer's ID. This is very fast.
-    local query='{ "size": 1000, "query": { "match_all": {} }, "_source": ["issuer"] }'
-
-    # Fetch data and save the 'hits' array to a file
-    curl -# -sk -XPOST "$GCHANGE_ADS_API" -H "Content-Type: application/json" -d "$query" |
-        jq '.hits.hits' > "$metadata_file"
-
-    echo "Metadata fetch complete."
+    # Fetch data and save the 'hits' array to both cache and working files
+    local response_file="$TEMP_DIR/gchange_response.json"
+    if curl -# -sk -XPOST "$GCHANGE_ADS_API" -H "Content-Type: application/json" -d "$query" > "$response_file"; then
+        # Check if response contains hits
+        if jq -e '.hits.hits' "$response_file" > "$cache_file" 2>/dev/null; then
+            cp "$cache_file" "$metadata_file"
+            echo "Metadata fetch complete and cached."
+        else
+            echo "ERROR: Invalid response structure from gchange API."
+            echo "Response preview:"
+            head -c 200 "$response_file"
+            echo "..."
+            return 1
+        fi
+    else
+        echo "ERROR: Failed to fetch ad metadata from gchange."
+        return 1
+    fi
 
     if [[ ! -s "$metadata_file" ]]; then
         echo "ERROR: Could not fetch any ad metadata from gchange."
@@ -280,8 +378,10 @@ EOF
         user_id=$(echo "$ad_meta" | jq -r '._source.issuer | select(. != null)')
         local ad_id
         ad_id=$(echo "$ad_meta" | jq -r '._id')
+        local ad_title
+        ad_title=$(echo "$ad_meta" | jq -r '._source.title // "No title"')
 
-        echo "Processing ad $processed_ads/$total_ads ($ad_id)... "
+        echo "Processing ad $processed_ads/$total_ads ($ad_id) - \"$ad_title\"... "
 
         if [[ -z "$user_id" ]]; then
             echo " -> No issuer. Skipping."
