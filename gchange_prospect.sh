@@ -350,15 +350,9 @@ EOF
     existing_cache_count=$(find "$cache_dir" -name "*.gchange.json" 2>/dev/null | wc -l)
     echo "Found $existing_cache_count existing Gchange cache files"
     
-    # Create temporary files for batch processing
-    local temp_new_members="$TEMP_DIR/new_gchange_members.json"
+    # Create temporary files for updates
     local temp_updates="$TEMP_DIR/gchange_updates.json"
-    echo "[]" > "$temp_new_members"
     echo "[]" > "$temp_updates"
-    
-    # Batch processing variables
-    local batch_size=50
-    local current_batch=0
 
     local total_ads
     total_ads=$(jq 'length' < "$metadata_file")
@@ -471,8 +465,8 @@ EOF
                 continue
             fi
             
-            # 3. Create new member for batch processing
-            echo "    -> Queuing for batch addition..."
+            # 3. Create and add new member immediately
+            echo "    -> Adding new member to database..."
             local new_member
             new_member=$(jq -n \
               --arg uid "$user_id" \
@@ -485,11 +479,11 @@ EOF
               --arg cesium_pubkey "$cesium_pubkey_from_gchange" \
               '{ "uid": $uid, "added_date": $added_date, "profile": $profile, "source": "gchange", "discovery_ad": $source_ad, "detected_ads": [$ad_id], "import_metadata": { "source_script": $import_source, "import_date": $import_date, "discovery_method": "ad_issuer" }, "linked_accounts": { "cesium_pubkey": $cesium_pubkey } }')
             
-            jq --argjson member "$new_member" '. += [$member]' "$temp_new_members" > "$temp_new_members.tmp"
-            mv "$temp_new_members.tmp" "$temp_new_members"
+            # Add member directly to the database
+            jq --argjson member "$new_member" '.members += [$member]' "$PROSPECT_FILE" > "$PROSPECT_FILE.new"
+            mv "$PROSPECT_FILE.new" "$PROSPECT_FILE"
             
             new_members=$((new_members + 1))
-            current_batch=$((current_batch + 1))
 
             # 4. Check for linked Cesium account and enrich G1 database
             local cesium_pubkey_new
@@ -498,28 +492,8 @@ EOF
                 enrich_g1_database "$cesium_pubkey_new" "$user_id"
             fi
             echo "    -> Done."
-            
-            # Process batch when it reaches the batch size
-            if [[ $current_batch -ge $batch_size ]]; then
-                echo "Processing batch of $current_batch new members..."
-                jq --argjson new_members "$(cat "$temp_new_members")" '.members += $new_members' "$PROSPECT_FILE" > "$PROSPECT_FILE.new"
-                mv "$PROSPECT_FILE.new" "$PROSPECT_FILE"
-                
-                # Reset batch
-                echo "[]" > "$temp_new_members"
-                current_batch=0
-                echo "Batch processed successfully"
-            fi
         fi
     done < <(jq -c '.[]' "$metadata_file")
-    
-    # Process remaining new members in the last batch
-    if [[ $current_batch -gt 0 ]]; then
-        echo "Processing final batch of $current_batch new members..."
-        jq --argjson new_members "$(cat "$temp_new_members")" '.members += $new_members' "$PROSPECT_FILE" > "$PROSPECT_FILE.new"
-        mv "$PROSPECT_FILE.new" "$PROSPECT_FILE"
-        echo "Final batch processed successfully"
-    fi
     
     # Process all updates in batch
     local updates_count
@@ -544,7 +518,7 @@ EOF
     mv "$PROSPECT_FILE.new" "$PROSPECT_FILE"
     
     # Clean up temporary files
-    rm -f "$temp_new_members" "$temp_updates" "$TEMP_DIR/existing_uids.txt" "$TEMP_DIR"/user_*_ads.json "$TEMP_DIR/g1_existing_pubkeys.txt"
+    rm -f "$temp_updates" "$TEMP_DIR/existing_uids.txt" "$TEMP_DIR"/user_*_ads.json "$TEMP_DIR/g1_existing_pubkeys.txt"
     
     # Note: Cache files in $cache_dir are preserved for future use
     
