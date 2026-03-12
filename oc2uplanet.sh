@@ -5,7 +5,7 @@
 ########################################################################
 ## OC 2 UPlanet
 ########################################################################
-## Regularly make https://api.opencollective.com/graphql/v2 calls
+## Regularly make OpenCollective GraphQL API calls
 ## to fill-up members ZenCard with their donation 1€=1Ẑ (-OC%)
 ########################################################################
 ## INIT
@@ -17,9 +17,21 @@ echo "MONITORING ${OCSLUG}"
 echo "API key : ${OCAPIKEY}"
 
 #######################################################################
-## UPLANET SECRETS
+## UPLANET SECRETS & ORIGIN DETECTION
 #######################################################################
 UPLANETNAME="$(cat ~/.ipfs/swarm.key 2>/dev/null | tail -n 1)"
+ORIGIN_KEY="0000000000000000000000000000000000000000000000000000000000000000"
+
+## ORIGIN mode = dev/staging (swarm key all zeros)
+if [[ "$UPLANETNAME" == "$ORIGIN_KEY" || -z "$UPLANETNAME" ]]; then
+    IS_ORIGIN=1
+    OC_API="https://api-staging.opencollective.com/graphql/v2"
+    echo "⚠ MODE ORIGIN (DEV) — Using OC staging API"
+else
+    IS_ORIGIN=0
+    OC_API="${OC_API}"
+    echo "✅ MODE PRODUCTION — Using OC production API"
+fi
 #######################################################################
 ### CAPTAIN CREDENTIALS ##
 #######################################################################
@@ -81,7 +93,7 @@ SLUG_EMAIL_FILE="data/slugemail.list"
     "variables": {
       "slug": "'${OCSLUG}'"
     }
-  }'  https://api.opencollective.com/graphql/v2 > data/backers.json
+  }'  ${OC_API} > data/backers.json
 
 echo "Collective $slug BACKERS : data/backers.json"
 
@@ -94,17 +106,17 @@ cat data/backers.json \
 echo "data/slug_email_map.json"
 cat $SLUG_EMAIL_FILE | awk -F: '{print "{\"" $1 "\": \"" $2 "\"}"}' | jq -s 'add' > data/slug_email_map.json
 
-################################################## TRANSACTIONS RECEIVED
+################################################## TRANSACTIONS RECEIVED (with order/tier info)
 echo "Collective $slug TX : data/tx.json"
 curl -sX POST   \
         -H "Content-Type: application/json" \
         -H "Personal-Token: ${OCAPIKEY}" \
         -d '{
-    "query": "query ($slug: String) { account(slug: $slug) { name slug transactions(limit: 100, type: CREDIT) { totalCount nodes { type fromAccount { name slug emails } amount { value currency } createdAt } } } }",
+    "query": "query ($slug: String) { account(slug: $slug) { name slug transactions(limit: 100, type: CREDIT) { totalCount nodes { type fromAccount { name slug emails } amount { value currency } order { tier { slug name } } createdAt } } } }",
     "variables": {
       "slug": "'${OCSLUG}'"
     }
-  }'  https://api.opencollective.com/graphql/v2 > data/tx.json
+  }'  ${OC_API} > data/tx.json
 
 
 # Crédit du mois dernier
@@ -147,9 +159,118 @@ cat data/tx.json | jq --arg yesterday "$yesterday" '
   #~ "createdAt": "2023-02-06T10:15:28.042Z"
 #~ }
 
-## bingo.json !! ?
-# search for UPlanet "email" account
-## Astroport.ONE
-# and send Zen accordingly
+########################################################################
+## EMISSION ẐEN — Match OC transactions to MULTIPASS accounts
+########################################################################
+MY_PATH="$(cd "$(dirname "$0")" && pwd)"
+ASTROPORT="$HOME/.zen/Astroport.ONE"
+EMISSION_LOG="./data/emission.log"
+touch "$EMISSION_LOG"
 
-## CONTROL WALLET PRIMAL TRANSACTION CONCORDANCE
+## Map OC tier slug → UPLANET.official.sh command
+## OC tier slugs (from opencollective.com/monnaie-libre/projects/coeurbox/contribute/):
+##   parrainage-infrastructure-extension-128-go  → Satellite sociétaire (ZEN Card → SCIC 33/33/33/1)
+##   parrainage-infrastructure-module-gpu-1-24   → Constellation sociétaire (ZEN Card → SCIC 33/33/33/1)
+##   cotisation-services-cloud-usage             → Cloud locataire (recharge MULTIPASS immédiate)
+##   membre-resident-soutien-mensuel             → Membre locataire (recharge MULTIPASS mensuelle)
+dispatch_zen_emission() {
+    local email="$1" amount="$2" tier_slug="$3"
+    local zen_amount=$(echo "scale=2; $amount * 1" | bc)
+
+    case "$tier_slug" in
+        *parrainage*128-go*|*extension-128*|*satellite*)
+            ## Satellite 50€/an → process_societaire uniquement (ZEN Card → SCIC 33/33/33/1)
+            ## Le MULTIPASS reçoit son crédit initial lors de make_NOSTRCARD.sh (PRIMO TX)
+            ## Le montant offert est paramétré dans le DID Zen Economy de l'essaim
+            echo "  🛰 Satellite (${tier_slug}) → process_societaire"
+            ${ASTROPORT}/UPLANET.official.sh -s "${email}" -t satellite -m "${zen_amount}"
+            return $?
+            ;;
+        *parrainage*gpu*|*module-gpu*|*constellation*)
+            ## Constellation 540€/an → process_societaire uniquement (ZEN Card → SCIC 33/33/33/1)
+            ## Le MULTIPASS reçoit son crédit initial lors de make_NOSTRCARD.sh (PRIMO TX)
+            echo "  🌟 Constellation (${tier_slug}) → process_societaire"
+            ${ASTROPORT}/UPLANET.official.sh -s "${email}" -t constellation -m "${zen_amount}"
+            return $?
+            ;;
+        *cotisation*|*cloud-usage*|*services-cloud*)
+            ## Cotisation cloud usage → locataire (recharge MULTIPASS immédiate)
+            echo "  ☁ Cloud usage (${tier_slug}) → process_locataire"
+            ${ASTROPORT}/UPLANET.official.sh -l "${email}" -m "${zen_amount}"
+            return $?
+            ;;
+        *membre-resident*|*soutien-mensuel*)
+            ## Membre résident soutien mensuel → locataire (MULTIPASS cycle 4 semaines)
+            echo "  🏠 Membre résident (${tier_slug}) → process_locataire"
+            ${ASTROPORT}/UPLANET.official.sh -l "${email}" -m "${zen_amount}"
+            return $?
+            ;;
+        "")
+            ## No tier info — default to locataire
+            echo "  ⚠ No tier slug — default process_locataire"
+            ${ASTROPORT}/UPLANET.official.sh -l "${email}" -m "${zen_amount}"
+            return $?
+            ;;
+        *)
+            ## Unknown tier — log and default to locataire
+            echo "  ❓ Unknown tier '${tier_slug}' — default process_locataire"
+            ${ASTROPORT}/UPLANET.official.sh -l "${email}" -m "${zen_amount}"
+            return $?
+            ;;
+    esac
+}
+
+## Process current month CREDIT transactions
+echo "=== Processing current month credits ==="
+while IFS= read -r credit_json; do
+    [[ -z "$credit_json" ]] && continue
+
+    slug=$(echo "$credit_json" | jq -r '.fromAccount.slug // empty')
+    email=$(echo "$credit_json" | jq -r '.fromAccount.emails[0] // empty')
+    amount=$(echo "$credit_json" | jq -r '.amount.value // 0')
+    currency=$(echo "$credit_json" | jq -r '.amount.currency // "EUR"')
+    created_at=$(echo "$credit_json" | jq -r '.createdAt // empty')
+    tier_slug=$(echo "$credit_json" | jq -r '.order.tier.slug // empty')
+
+    ## If email is null in transaction, look up from slug:email map
+    if [[ -z "$email" || "$email" == "null" ]]; then
+        email=$(jq -r --arg s "$slug" '.[$s] // empty' data/slug_email_map.json 2>/dev/null)
+    fi
+
+    [[ -z "$email" || "$email" == "null" ]] && echo "⚠ No email for slug=$slug — skipping" && continue
+
+    ## Idempotency: check if transaction already processed
+    tx_id="${email}:${amount}:${created_at}"
+    if grep -qF "$tx_id" "$EMISSION_LOG" 2>/dev/null; then
+        echo "⏭ Already processed: $tx_id"
+        continue
+    fi
+
+    ## Check MULTIPASS exists
+    if [[ ! -f "$HOME/.zen/game/nostr/${email}/G1PUBNOSTR" ]]; then
+        echo "⚠ No MULTIPASS for ${email} — skipping"
+        continue
+    fi
+
+    ## Net amount from OC (fees already deducted). 1€ = 1Ẑ
+    echo "💰 ${email}: ${amount} ${currency} (tier: ${tier_slug:-unknown})"
+
+    ## Dispatch to correct UPLANET.official.sh mode
+    if [[ -x "${ASTROPORT}/UPLANET.official.sh" ]]; then
+        dispatch_zen_emission "${email}" "${amount}" "${tier_slug}"
+        RESULT=$?
+        if [[ $RESULT -eq 0 ]]; then
+            echo "  ✅ Emission OK"
+            echo "${tx_id}:${amount}:${tier_slug}:$(date +%s):OK" >> "$EMISSION_LOG"
+        else
+            echo "  ❌ Emission FAILED (exit $RESULT)"
+            echo "${tx_id}:${amount}:${tier_slug}:$(date +%s):FAIL" >> "$EMISSION_LOG"
+        fi
+    else
+        echo "  ❌ UPLANET.official.sh not found at ${ASTROPORT}"
+    fi
+
+done < <(jq -c '.' data/current_month.credit.json 2>/dev/null)
+
+echo "=== ẐEN emission complete ==="
+echo "Log: $EMISSION_LOG"

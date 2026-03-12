@@ -1,214 +1,136 @@
-# OC2UPlanet
+# OC2UPlanet — OpenCollective → ẐEN Economy Bridge
 
-Ce script Bash est conçu pour automatiser certaines tâches liées à la gestion des membres
-et des transactions d'un compte sur OpenCollective.
+Pont automatique entre les cotisations OpenCollective et l'économie ẐEN d'une station UPlanet.
 
+## Principe
 
-## PREREQUIS
+Chaque versement CREDIT constaté sur le collectif OpenCollective déclenche l'émission
+de ẐEN équivalents (1€ = 1Ẑ = 0.1Ğ1) vers les portefeuilles appropriés via `UPLANET.official.sh`.
 
-1. Créez un compte sur [Open Collective](https://opencollective.com)
+### Flux par type de contribution
 
-`USLUG=$slug`
+| Tier OpenCollective | Slug OC | Action | Destination |
+|---|---|---|---|
+| Satellite (50€/an) | `parrainage-infrastructure-extension-128-go` | `process_societaire` | ZEN Card → SCIC 33/33/33/1 |
+| Constellation (540€/an) | `parrainage-infrastructure-module-gpu-1-24` | `process_societaire` | ZEN Card → SCIC 33/33/33/1 |
+| Cloud usage | `cotisation-services-cloud-usage` | `process_locataire` | Recharge MULTIPASS immédiate |
+| Membre résident | `membre-resident-soutien-mensuel` | `process_locataire` | Recharge MULTIPASS mensuelle |
 
-2. Créez un "token API" developpeur : xxxxxxxxxxxxxxxxxxxx
+**Note :** Les sociétaires (Satellite/Constellation) ne rechargent pas le MULTIPASS.
+Le MULTIPASS reçoit son crédit initial lors de la création (`make_NOSTRCARD.sh` → PRIMO TX 1Ğ1).
+Le montant offert est paramétré dans le DID Zen Economy de l'essaim.
 
-https://opencollective.com/dashboard/`$USLUG`/for-developers/personal-tokens/
+## Prérequis
 
-3. Devenez administrateur "OCSLUG" : yyyyyyyyyy
+1. [Astroport.ONE](https://github.com/papiche/Astroport.ONE) installé avec un compte Capitaine
+2. Un collectif OpenCollective configuré (voir [GUIDE_SETUP_OC.md](GUIDE_SETUP_OC.md))
+3. Un Personal Token API OC
 
-Entité juridique qui possède le portefeuille "UNL"
-qui pour tout CREDIT envoye une quantité équivalente de "Ẑen".
+## Configuration
 
-4. Installez [Astroport.ONE](https://github.com/papiche/Astroport.ONE) créez votre compte "Capitaine"
-
-
-5. ForkUPlanetZERO depuis au moins 3 Stations
-
-
-## CREATE `.env`
-
-
-```
-#######################################################################
-## Open Collective API KEY
-## https://docs.opencollective.com/help/contributing/development/api
-#######################################################################
-OCAPIKEY="xxxxxxxxxxxxxxxxxxxx"
-OCSLUG="yyyyyyyyyy"
-```
-
-## RUN `./run.sh`
-
-
-```
-./run.sh
-```
-
----
-
-
-le principe de ce programme est de contrôler les versements constatés sur le collectif https://opencollective.com/made-in-zen
-et de maintenir une équivalence en nombre de "tokens" Ẑen transférés entre le portefeuille maitre d'une instance UPlanet
- et les portefeuilles des membres ayant abondé à l'émission du "stable coin" du collectif
-
-Ce script Bash est conçu pour automatiser certaines tâches liées à la gestion des membres et des transactions d'un compte sur OpenCollective. Voici une explication détaillée de chaque section du script :
-
-### Initialisation
+### `.env`
 
 ```bash
-[[ ! -s .env ]] && echo "ERROR 0 missing .env" && exit 1
-export $(xargs <.env)
-mkdir -p ./data
+OCAPIKEY="votre_personal_token"
+OCSLUG="votre-slug-collectif"
 ```
 
-- Vérifie si le fichier `.env` existe et n'est pas vide. Si ce n'est pas le cas, affiche une erreur et quitte le script.
-- Charge les variables d'environnement depuis le fichier `.env`.
-- Crée le répertoire `./data` s'il n'existe pas déjà.
+Le mode ORIGIN (dev/staging) est **auto-détecté** via `~/.ipfs/swarm.key` :
+- Clé tout-zéros → API staging (`api-staging.opencollective.com`)
+- Clé réelle → API production (`api.opencollective.com`)
 
-### Nettoyage des anciennes données
+### Lancement
 
+Le script est exécuté **automatiquement une fois par mois** par `20h12.process.sh`
+(le processus cron quotidien d'Astroport). Le marqueur `~/.zen/game/.oc2uplanet_monthly.done`
+empêche les exécutions multiples dans le même mois.
+
+Lancement manuel :
 ```bash
-find ./data -mtime +1 -type f -exec rm '{}' \;
+cd ~/.zen/workspace/OC2UPlanet
+./oc2uplanet.sh
 ```
 
-- Supprime les fichiers dans le répertoire `./data` qui ont plus d'un jour.
+### Webhook temps réel (optionnel)
 
-### Définition des dates
+Pour les recharges immédiates (cotisation cloud-usage), un endpoint webhook est disponible
+sur l'API UPassport :
 
-```bash
-today=$(date +"%Y-%m-%d")
-yesterday=$(date -d 'yesterday' +'%Y-%m-%d')
-start_of_week=$(date -d "last monday" +"%Y-%m-%d")
-start_of_month=$(date -d "$(date +%Y-%m-01)" +"%Y-%m-%d")
-start_of_year=$(date -d "$(date +%Y-01-01)" +"%Y-%m-%d")
+```
+POST https://votre-station:54321/oc_webhook
 ```
 
-- Définit les variables pour la date d'aujourd'hui, d'hier, le début de la semaine, du mois et de l'année.
+Configurez l'URL webhook dans l'admin OC du collectif pour l'événement
+`collective.transaction.created`.
 
-### Récupération des emails des backers
+## Fonctionnement
 
-```bash
-[[ ! -s data/backers.json ]] \
-&& curl -sX POST \
-  -H "Content-Type: application/json" \
-  -H "Personal-Token: ${OCAPIKEY}" \
-  -d '{
-    "query": "query account($slug: String) {
-      account(slug: $slug) {
-        name
-        slug
-        members(role: BACKER, limit: 100) {
-          totalCount
-          nodes {
-            account {
-              name
-              slug
-              emails
-            }
-          }
-        }
+1. **Récupération des backers** — Requête GraphQL `members(role: BACKER)` → `data/backers.json`
+2. **Mapping slug→email** — Extraction des correspondances → `data/slug_email_map.json`
+3. **Récupération des transactions** — `transactions(type: CREDIT)` avec `order { tier { slug } }` → `data/tx.json`
+4. **Filtrage temporel** — Extraction des crédits du mois en cours → `data/current_month.credit.json`
+5. **Dispatch par tier** — Chaque transaction est routée via `dispatch_zen_emission()` :
+   - Identification du tier slug depuis la réponse GraphQL
+   - Vérification que le MULTIPASS existe (`~/.zen/game/nostr/{email}/G1PUBNOSTR`)
+   - Contrôle d'idempotence via `data/emission.log`
+   - Appel `UPLANET.official.sh` avec les bons flags (`-s` sociétaire ou `-l` locataire)
+
+### Requête GraphQL transactions (avec tier)
+
+```graphql
+query ($slug: String) {
+  account(slug: $slug) {
+    name slug
+    transactions(limit: 100, type: CREDIT) {
+      totalCount
+      nodes {
+        type
+        fromAccount { name slug emails }
+        amount { value currency }
+        order { tier { slug name } }
+        createdAt
       }
-    }",
-    "variables": {
-      "slug": "'${OCSLUG}'"
     }
-  }' \
-  https://api.opencollective.com/graphql/v2 > data/backers.json
+  }
+}
 ```
 
-- Si le fichier `data/backers.json` n'existe pas ou est vide, envoie une requête POST à l'API GraphQL d'OpenCollective pour récupérer les informations des backers.
-- Sauvegarde la réponse dans `data/backers.json`.
+### Structure des données
 
-### Extraction des slugs et des emails
-
-```bash
-cat data/backers.json \
-| jq -r '.data.account.members.nodes[] | "\(.account.slug):\(.account.emails[0])"' > data/slugemail.list
+```
+data/
+├── backers.json                  # Liste des backers (emails)
+├── slugemail.list                # Correspondances slug:email
+├── slug_email_map.json           # Map JSON {slug: email}
+├── tx.json                       # Transactions CREDIT brutes
+├── current_month.credit.json     # Crédits du mois en cours
+├── last_month.credit.json        # Crédits du mois précédent
+├── yesterday.credit.json         # Crédits d'hier
+└── emission.log                  # Log d'idempotence (tx traitées)
 ```
 
-- Utilise `jq` pour extraire les slugs et les emails des backers depuis `data/backers.json` et les sauvegarde dans `data/slugemail.list`.
-
-### Recherche des crédits d'hier
-
-```bash
-curl -X POST \
-  -H "Content-Type: application/json" \
-  -H "Personal-Token: ${OCAPIKEY}" \
-  -d '{
-    "query": "query ($slug: String) {
-      account(slug: $slug) {
-        name
-        slug
-        transactions(limit: 10, type: CREDIT) {
-          totalCount
-          nodes {
-            type
-            fromAccount {
-              name
-              slug
-              emails
-            }
-            amount {
-              value
-              currency
-            }
-            createdAt
-          }
-        }
-      }
-    }",
-    "variables": {
-      "slug": "'${OCSLUG}'"
-    }
-  }' \
-  https://api.opencollective.com/graphql/v2 > data/tx.json
-```
-
-- Envoie une requête POST à l'API GraphQL d'OpenCollective pour récupérer les transactions de type "CREDIT" du compte spécifié.
-- Sauvegarde la réponse dans `data/tx.json`.
-
-### Filtrage des crédits d'hier
-
-```bash
-cat data/tx.json | jq --arg yesterday "$yesterday" '.data.account.transactions.nodes[] | select(.type == "CREDIT" and (.createdAt | startswith($yesterday)))' \
-    > data/yesterday.credit.json
-```
-
-- Utilise `jq` pour filtrer les transactions de type "CREDIT" qui ont été créées hier et les sauvegarde dans `data/yesterday.credit.json`.
-
-### Exemple de données de crédit d'hier
+### Exemple transaction CREDIT
 
 ```json
 {
   "type": "CREDIT",
   "fromAccount": {
-    "name": "Astroport",
-    "slug": "monnaie-libre",
-    "emails": null
+    "name": "Alice",
+    "slug": "alice-doe",
+    "emails": ["alice@example.com"]
   },
-  "amount": {
-    "value": 259.53,
-    "currency": "EUR"
+  "amount": { "value": 50.00, "currency": "EUR" },
+  "order": {
+    "tier": {
+      "slug": "parrainage-infrastructure-extension-128-go",
+      "name": "Satellite 128 Go"
+    }
   },
-  "createdAt": "2023-02-06T10:15:28.042Z"
+  "createdAt": "2026-03-01T10:15:28.042Z"
 }
 ```
 
-- Exemple de structure JSON pour une transaction de crédit d'hier.
-
-### Affichage des crédits d'hier
-
-```bash
-cat data/yesterday.credit.json | jq -r
-```
-
-- Affiche le contenu de `data/yesterday.credit.json` de manière lisible.
-
-### Commentaires supplémentaires
-
-- Le script mentionne également la recherche d'un compte "UPlanet" par email et l'envoi de Zen en conséquence, mais cette partie n'est pas implémentée dans le code fourni.
-- Il y a aussi une mention de contrôle de la concordance des transactions du portefeuille primal, mais cela n'est pas détaillé dans le script.
-
-Ce script est utile pour automatiser la gestion des membres et des transactions sur OpenCollective, en particulier pour les tâches récurrentes comme la récupération des emails des backers et la vérification des transactions de crédit.
-
 ---
+
+Voir [GUIDE_SETUP_OC.md](GUIDE_SETUP_OC.md) pour la configuration complète d'OpenCollective
+pour une nouvelle UPlanet ẐEN.
