@@ -18,23 +18,38 @@ if [[ -f "$COOP_CONFIG" ]]; then
     coop_load_env_vars 2>/dev/null || true
 fi
 
+# Auto-detect ORIGIN vs ZEN mode from swarm.key
+UPLANETNAME_CHECK="$(cat ~/.ipfs/swarm.key 2>/dev/null | tail -n 1)"
+ORIGIN_KEY="0000000000000000000000000000000000000000000000000000000000000000"
+if [[ "$UPLANETNAME_CHECK" == "$ORIGIN_KEY" || -z "$UPLANETNAME_CHECK" ]]; then
+    IS_ORIGIN=true
+    OC_API="${OC_API:-https://api-staging.opencollective.com/graphql/v2}"
+else
+    IS_ORIGIN=false
+    OC_API="${OC_API:-https://api.opencollective.com/graphql/v2}"
+fi
+
 # Fallback: load .env if OCSLUG/OCAPIKEY still unset
 if [[ -z "${OCSLUG:-}" || -z "${OCAPIKEY:-}" ]]; then
     if [[ -s .env ]]; then
         export $(grep -v '^#' .env | xargs)
         echo "OC credentials loaded from .env (legacy)"
-    else
-        echo "ERROR: No OC credentials found (cooperative-config or .env)"
-        exit 1
     fi
 fi
 
-# Auto-detect OC API endpoint from swarm.key (ORIGIN = staging, prod = api.opencollective.com)
-UPLANETNAME_CHECK="$(cat ~/.ipfs/swarm.key 2>/dev/null | tail -n 1)"
-if [[ "$UPLANETNAME_CHECK" == "0000000000000000000000000000000000000000000000000000000000000000" || -z "$UPLANETNAME_CHECK" ]]; then
-    OC_API="${OC_API:-https://api-staging.opencollective.com/graphql/v2}"
-else
-    OC_API="${OC_API:-https://api.opencollective.com/graphql/v2}"
+# Default OCSLUG for ORIGIN mode (UPlanet ORIGIN = monnaie-libre on staging)
+[[ -z "${OCSLUG:-}" ]] && OCSLUG="monnaie-libre"
+
+# Check OCAPIKEY is set
+if [[ -z "${OCAPIKEY:-}" ]]; then
+    if [[ "$IS_ORIGIN" == true ]]; then
+        echo "⚠️  OCAPIKEY not set — configure via: cooperative_config.sh set OCAPIKEY \"your_staging_token\""
+        echo "   Generate at: https://staging.opencollective.com/dashboard/${OCSLUG}/for-developers/personal-tokens/"
+    else
+        echo "⚠️  OCAPIKEY not set — configure via: cooperative_config.sh set OCAPIKEY \"your_token\""
+        echo "   Generate at: https://opencollective.com/dashboard/${OCSLUG}/for-developers/personal-tokens/"
+    fi
+    exit 1
 fi
 
 # Constants
