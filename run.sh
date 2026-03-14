@@ -11,9 +11,31 @@
 
 set -euo pipefail
 
-# Load environment variables
-[[ ! -s .env ]] && echo "ERROR: missing .env" && exit 1
-export $(xargs <.env)
+# Load environment variables from cooperative-config (NOSTR DID) or .env fallback
+COOP_CONFIG="$HOME/.zen/Astroport.ONE/tools/cooperative_config.sh"
+if [[ -f "$COOP_CONFIG" ]]; then
+    source "$COOP_CONFIG"
+    coop_load_env_vars 2>/dev/null || true
+fi
+
+# Fallback: load .env if OCSLUG/OCAPIKEY still unset
+if [[ -z "${OCSLUG:-}" || -z "${OCAPIKEY:-}" ]]; then
+    if [[ -s .env ]]; then
+        export $(grep -v '^#' .env | xargs)
+        echo "OC credentials loaded from .env (legacy)"
+    else
+        echo "ERROR: No OC credentials found (cooperative-config or .env)"
+        exit 1
+    fi
+fi
+
+# Auto-detect OC API endpoint from swarm.key (ORIGIN = staging, prod = api.opencollective.com)
+UPLANETNAME_CHECK="$(cat ~/.ipfs/swarm.key 2>/dev/null | tail -n 1)"
+if [[ "$UPLANETNAME_CHECK" == "0000000000000000000000000000000000000000000000000000000000000000" || -z "$UPLANETNAME_CHECK" ]]; then
+    OC_API="${OC_API:-https://api-staging.opencollective.com/graphql/v2}"
+else
+    OC_API="${OC_API:-https://api.opencollective.com/graphql/v2}"
+fi
 
 # Constants
 DATA_DIR="./data"
@@ -54,7 +76,7 @@ if [[ ! -s "$DATA_DIR/backers.json" ]]; then
       "query": "query account($slug: String) { account(slug: $slug) { name slug members(role: BACKER, limit: 200) { totalCount nodes { account { name slug emails } } } } }",
       "variables": { "slug": "'${OCSLUG}'" }
     }' \
-    https://api.opencollective.com/graphql/v2 > "$DATA_DIR/backers.json"
+    "$OC_API" > "$DATA_DIR/backers.json"
 fi
 
 echo "Collective $OCSLUG BACKERS: $DATA_DIR/backers.json"
