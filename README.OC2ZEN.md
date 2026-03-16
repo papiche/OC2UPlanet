@@ -106,7 +106,45 @@ data/
 ├── current_month.credit.json     # Crédits du mois en cours
 ├── last_month.credit.json        # Crédits du mois précédent
 ├── yesterday.credit.json         # Crédits d'hier
-└── emission.log                  # Log d'idempotence (tx traitées)
+├── emission.log                  # Log d'idempotence (tx traitées)
+├── expenses.json                 # Expenses OC (PENDING/REJECTED/PAID)
+├── restitution_pending.json      # TX RESTITUTION reçues par uplanet.G1
+├── restitution.log               # Expenses PAID (finalisées)
+└── refund.log                    # Expenses REJECTED (remboursées)
+```
+
+### Rétroaction : surveillance des indemnisations (oc_expense_monitor.sh)
+
+Lorsqu'un membre restitue des crédits ẐEN via Ẑinkgo (TX `RESTITUTION:INDEMNISATION`
+vers `uplanet.G1.dunikey`), il dépose ensuite une note de frais sur OpenCollective.
+
+Le script `oc_expense_monitor.sh` (appelé automatiquement par `oc2uplanet.sh`) surveille
+le statut de ces expenses :
+
+| Statut OC | Action |
+|---|---|
+| **PENDING** | En attente de validation — aucune action |
+| **APPROVED** | Validée, en cours de paiement — aucune action |
+| **PAID** | Payée → marquer comme finalisée dans `restitution.log` |
+| **REJECTED** | Refusée → **reverser les ẐEN** au MULTIPASS du membre |
+
+#### Flux de rétroaction (expense REJECTED)
+
+```
+1. Membre restitue 30 ẐEN → uplanet.G1.dunikey (TX: RESTITUTION:INDEMNISATION)
+2. Membre dépose note de frais 30€ sur OpenCollective
+3. Admin OC refuse la note de frais (REJECTED)
+4. oc_expense_monitor.sh détecte le REJECTED
+5. PAYforSURE.sh envoie 3 Ğ1 (= 30 ẐEN) depuis uplanet.G1.dunikey → MULTIPASS
+   Comment: REFUND:REJECTED:{expense_id}
+6. Logged dans refund.log (idempotent)
+```
+
+#### Lancement manuel
+
+```bash
+cd ~/.zen/workspace/OC2UPlanet
+./oc_expense_monitor.sh
 ```
 
 ### Exemple transaction CREDIT

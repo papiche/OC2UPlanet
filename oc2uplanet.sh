@@ -35,12 +35,9 @@ fi
 #######################################################################
 ### CAPTAIN CREDENTIALS ##
 #######################################################################
-if [[ ! -z $UPLANETNAME ]]; then
-    source ~/.zen/game/players/.current/secret.june
-    echo SALT = $SALT
-    echo PEPPER = $PEPPER
-else
+if [[ -z $UPLANETNAME ]]; then
     echo "MISSING PRIVATE SWARM ACTIVATED ASTROPORT STATION"
+    exit 1
 fi
 ## CLEAN OLD data
 find ./data -mtime +1 -type f -exec rm '{}' \;
@@ -274,3 +271,12 @@ done < <(jq -c '.' data/current_month.credit.json 2>/dev/null)
 
 echo "=== ẐEN emission complete ==="
 echo "Log: $EMISSION_LOG"
+
+########################################################################
+## EXPENSE MONITORING — Refund rejected restitutions
+########################################################################
+if [[ -x "$MY_PATH/oc_expense_monitor.sh" ]]; then
+    echo ""
+    echo "=== Running expense monitor (restitution refunds) ==="
+    "$MY_PATH/oc_expense_monitor.sh" || echo "⚠ Expense monitor returned non-zero"
+fi

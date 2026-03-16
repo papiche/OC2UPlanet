@@ -40,7 +40,7 @@ Depuis l'admin du projet (`/admin/tiers`), créez exactement ces 4 tiers :
 - **Nom** : Parrainage Infrastructure Extension 128 Go
 - **Slug** : `parrainage-infrastructure-extension-128-go`
 - **Type** : Contribution récurrente
-- **Montant** : 50€/an (ou ~4.17€/mois)
+- **Montant** : 50€/an (ou ~1€/sem)
 - **Description** : Parrainage d'une extension de stockage 128 Go sur une station UPlanet.
   Le contributeur devient sociétaire de la SCIC et reçoit une ZEN Card.
 
@@ -48,7 +48,7 @@ Depuis l'admin du projet (`/admin/tiers`), créez exactement ces 4 tiers :
 - **Nom** : Parrainage Infrastructure Module GPU
 - **Slug** : `parrainage-infrastructure-module-gpu-1-24`
 - **Type** : Contribution récurrente
-- **Montant** : 540€/an (ou 45€/mois)
+- **Montant** : 540€ / 3ans
 - **Description** : Parrainage d'un module GPU sur une constellation UPlanet.
   Le contributeur devient sociétaire de la SCIC et reçoit une ZEN Card.
 
