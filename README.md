@@ -35,9 +35,9 @@ OCAPIKEY="votre_personal_token"
 OCSLUG="votre-slug-collectif"
 ```
 
-Le mode ORIGIN (dev/staging) est **auto-détecté** via `~/.ipfs/swarm.key` :
-- Clé tout-zéros → API staging (`api-staging.opencollective.com`)
-- Clé réelle → API production (`api.opencollective.com`)
+Le mode ORIGIN est **auto-détecté** via `~/.ipfs/swarm.key` :
+- API staging (`api-staging.opencollective.com`)
+- API production (`api.opencollective.com`)
 
 ### Lancement
 

@@ -9,12 +9,33 @@
 ## to fill-up members ZenCard with their donation 1€=1Ẑ (-OC%)
 ########################################################################
 ## INIT
-[[ ! -s .env ]] && echo "ERROR 0 missing .env" && exit 1
-export $(xargs <.env)
+## Charger .env local si présent (optionnel — le DID NOSTR coopératif peut suffire)
+[[ -s .env ]] && export $(xargs <.env)
 mkdir -p ./data
 
+##############################################################################
+## FALLBACK : DID NOSTR coopératif (kind 30800, chiffré avec $UPLANETNAME)
+## Toutes les stations du même essaim partagent automatiquement OCAPIKEY/OCSLUG
+##############################################################################
+ASTROPORT="${HOME}/.zen/Astroport.ONE"
+COOP_CONFIG="${ASTROPORT}/tools/cooperative_config.sh"
+
+if [[ -z "${OCAPIKEY}" && -f "${COOP_CONFIG}" ]]; then
+    echo "ℹ️  OCAPIKEY absent du .env → lecture depuis le DID NOSTR coopératif..."
+    source "${COOP_CONFIG}" 2>/dev/null
+    _coop_ocapikey=$(coop_config_get "OCAPIKEY" 2>/dev/null)
+    [[ -n "${_coop_ocapikey}" ]] && export OCAPIKEY="${_coop_ocapikey}" \
+        && echo "✅ OCAPIKEY chargé depuis le DID NOSTR coopératif"
+    _coop_ocslug=$(coop_config_get "OCSLUG" 2>/dev/null)
+    [[ -n "${_coop_ocslug}" && -z "${OCSLUG}" ]] && export OCSLUG="${_coop_ocslug}"
+    _coop_oc_api=$(coop_config_get "OC_API" 2>/dev/null)
+    [[ -n "${_coop_oc_api}" && -z "${OC_API}" ]] && export OC_API="${_coop_oc_api}"
+fi
+
+[[ -z "${OCAPIKEY}" ]] && echo "ERROR 0 : OCAPIKEY manquant (ni dans .env ni dans le DID NOSTR coopératif)" && exit 1
+
 echo "MONITORING ${OCSLUG}"
-echo "API key : ${OCAPIKEY}"
+echo "API key : ${OCAPIKEY:0:8}…"
 
 #######################################################################
 ## UPLANET SECRETS & ORIGIN DETECTION
@@ -22,14 +43,19 @@ echo "API key : ${OCAPIKEY}"
 UPLANETNAME="$(cat ~/.ipfs/swarm.key 2>/dev/null | tail -n 1)"
 ORIGIN_KEY="0000000000000000000000000000000000000000000000000000000000000000"
 
-## ORIGIN mode = dev/staging (swarm key all zeros)
-if [[ "$UPLANETNAME" == "$ORIGIN_KEY" || -z "$UPLANETNAME" ]]; then
+## Si OC_API est explicitement défini dans .env → le respecter toujours
+## Sinon, auto-détecter selon swarm.key (staging si ORIGIN, prod sinon)
+if [[ -n "${OC_API}" ]]; then
+    ## OC_API forcé via .env — priorité absolue
+    IS_ORIGIN=0
+    echo "✅ OC_API forcé via .env : ${OC_API}"
+elif [[ "$UPLANETNAME" == "$ORIGIN_KEY" || -z "$UPLANETNAME" ]]; then
     IS_ORIGIN=1
     OC_API="https://api-staging.opencollective.com/graphql/v2"
     echo "⚠ MODE ORIGIN (DEV) — Using OC staging API"
 else
     IS_ORIGIN=0
-    OC_API="${OC_API}"
+    OC_API="https://api.opencollective.com/graphql/v2"
     echo "✅ MODE PRODUCTION — Using OC production API"
 fi
 #######################################################################

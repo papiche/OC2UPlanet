@@ -74,18 +74,84 @@ Depuis l'admin du projet (`/admin/tiers`), créez exactement ces 4 tiers :
 
 ---
 
-## Étape 2 : Générer le Personal Token API
+## Étape 2 : Authentification API — Personal Token ou OAuth ?
 
-1. Allez dans l'admin de votre collectif :
-   `https://opencollective.com/dashboard/{votre-slug}/for-developers/personal-tokens/`
+> ⚠️ **Clarification importante** : OC propose deux mécanismes d'authentification distincts.
+> Les scripts `oc2uplanet.sh` et l'endpoint `/oc_webhook` de UPassport utilisent **uniquement**
+> le **Personal Token**. L'OAuth App (ZEN0) est un mécanisme séparé, optionnel.
 
-2. Créez un nouveau Personal Token avec les scopes :
-   - `account` (lecture des emails backers)
-   - `transactions` (lecture des transactions)
+### 2.1 Personal Token (requis pour les scripts)
 
-3. Copiez le token généré
+Le Personal Token est un jeton d'accès direct lié à **votre compte utilisateur OC personnel**
+(pas au dashboard du collectif). Il permet aux scripts bash de faire des appels GraphQL
+en votre nom, sans interaction utilisateur.
 
-### Mode ORIGIN (staging/dev)
+> ⚠️ **Si vous ne trouvez pas l'option** : c'est parce que vous cherchez dans le dashboard
+> du *collectif* (`monnaie-libre`). La section Personal Token est sous **votre profil personnel**.
+
+**URL exacte :**
+```
+https://opencollective.com/dashboard/[VOTRE-LOGIN-PERSONNEL]/for-developers/personal-tokens/
+```
+Remplacer `[VOTRE-LOGIN-PERSONNEL]` par votre propre slug de profil OC (ex: `fred-kaminski`, `papa-astro`…).
+Ce n'est PAS le slug du collectif.
+
+1. Créez un nouveau Personal Token en cochant **exactement ces scopes** :
+
+   | Scope OC | Pourquoi requis |
+   |---|---|
+   | ✅ `account` | Lire les emails des backers (`members { emails }`) |
+   | ✅ `transactions` | Lire les transactions CREDIT avec le tier (`order { tier { slug } }`) |
+   | ✅ `expenses` | Surveiller les notes de frais RESTITUTION (`oc_expense_monitor.sh`) |
+
+   > ⚠️ Sans le scope `account`, les emails des backers ne seront pas accessibles → aucun virement possible.
+
+2. **Cochez READ uniquement** — les scripts n'écrivent jamais sur OC (les virements ẐEN se font via la blockchain Ğ1, pas via l'API OC).
+
+3. Copiez le token généré → c'est votre **`OCAPIKEY`** dans le fichier `.env`
+
+4. Vous devez être **administrateur** du collectif `OCSLUG` pour que le token donne accès aux emails des backers.
+
+### 2.2 OAuth App ZEN0 (optionnel — identification web des membres)
+
+L'application OAuth (ZEN0 avec son `client_id` et `client_secret`) sert à un usage **différent** :
+permettre à un membre OC de s'authentifier depuis l'interface web UPassport en cliquant
+"Se connecter avec OpenCollective". C'est le **flux OAuth standard** (authorization code flow).
+
+| | Personal Token | OAuth App ZEN0 |
+|---|---|---|
+| **Usage** | Scripts serveur automatisés | Interface web membre |
+| **Nécessaire pour `oc2uplanet.sh`** | ✅ Oui | ❌ Non |
+| **Nécessaire pour `/oc_webhook`** | ✅ Oui (résolution GraphQL) | ❌ Non |
+| **URL de callback** | Aucune | `https://votre-domaine:54321/oc_oauth_callback` |
+| **Où le stocker** | `.env` → `OCAPIKEY` | `.env` → `OC_CLIENT_ID` / `OC_CLIENT_SECRET` |
+
+#### Où inscrire l'URL de callback OAuth ?
+
+Si vous souhaitez activer l'identification OC des membres depuis UPassport, renseignez
+dans l'admin de l'app ZEN0 (`for-developers/oauth/`) :
+
+```
+URL de rappel : https://votre-domaine:54321/oc_oauth_callback
+```
+
+> Cette fonctionnalité n'est **pas encore implémentée** dans UPassport. Les scripts
+> fonctionnent sans elle. Laissez l'URL de callback vide pour l'instant ou mettez
+> `https://localhost:54321/oc_oauth_callback` pour le développement.
+
+#### Stocker les credentials OAuth dans `.env`
+
+```bash
+# Personal Token (obligatoire pour les scripts)
+OCAPIKEY="votre_personal_token_ici"
+OCSLUG="votre-slug-collectif"
+
+# OAuth App ZEN0 (optionnel — futur usage web)
+OC_CLIENT_ID="68133e7a2ba37db06bbf"
+OC_CLIENT_SECRET="8e1f490036c81f09f7a8039bc2c..."
+```
+
+### 2.3 Mode ORIGIN (staging/dev)
 
 Si vous êtes en mode développement (swarm key tout-zéros dans `~/.ipfs/swarm.key`),
 utilisez l'API staging :
@@ -109,18 +175,51 @@ cd OC2UPlanet
 
 > Note : `20h12.process.sh` fait automatiquement le `git clone` si le dossier n'existe pas.
 
-### 3.2 Créer le fichier `.env`
+### 3.2 Configurer l'OCAPIKEY — deux méthodes
+
+#### Méthode A (recommandée) : DID NOSTR coopératif — configuration partagée swarm
+
+> ✅ **À faire une seule fois** sur la station Capitaine. Toutes les autres stations
+> du même essaim (même `swarm.key`) récupèrent automatiquement l'`OCAPIKEY` déchiffré.
+
+L'`OCAPIKEY` est stocké **chiffré** dans un événement NOSTR kind 30800
+(`d-tag: cooperative-config`) via [`cooperative_config.sh`](../Astroport.ONE/tools/cooperative_config.sh) :
+
+```bash
+# Sur la station Capitaine (une seule fois) :
+source ~/.zen/Astroport.ONE/tools/cooperative_config.sh
+coop_config_set OCAPIKEY "votre_personal_token_ici"
+coop_config_set OCSLUG "monnaie-libre"
+coop_config_set OC_API "https://api.opencollective.com/graphql/v2"
+```
+
+Le chiffrement utilise `$UPLANETNAME` (clé privée de l'essaim) → seules les stations
+avec la même `swarm.key` peuvent déchiffrer. L'`oc2uplanet.sh` et l'endpoint `/oc_webhook`
+de UPassport lisent automatiquement ce DID si le `.env` local est absent ou incomplet.
+
+#### Méthode B (fallback) : fichier `.env` local
 
 ```bash
 cp .env.example .env
 nano .env
 ```
 
-Contenu :
+Contenu minimal en production :
 ```bash
+# — Personal Token de votre profil OC personnel
 OCAPIKEY="votre_personal_token_ici"
-OCSLUG="votre-slug-collectif"
+
+# — Slug du collectif OC
+OCSLUG="monnaie-libre"
+
+# — Forcer l'API production quelle que soit la swarm.key
+OC_API="https://api.opencollective.com/graphql/v2"
 ```
+
+> **Priorité de chargement** (dans `oc2uplanet.sh` et `finance.py`) :
+> 1. `.env` local → 2. DID NOSTR coopératif → 3. variables d'environnement
+>
+> Le `.env` local peut rester vide ou absent si le DID NOSTR est configuré.
 
 ### 3.3 Rendre exécutable
 
@@ -142,35 +241,47 @@ Vérifiez :
 
 ---
 
-## Étape 4 : Configurer le webhook (optionnel)
+## Étape 4 : Configurer le webhook (recommandé)
 
-Pour les recharges immédiates (sans attendre le cycle mensuel) :
+Pour les recharges **immédiates** (sans attendre le cycle mensuel cron) :
 
 ### 4.1 URL du webhook
 
-L'endpoint est disponible sur l'API UPassport de la station :
+L'endpoint `/oc_webhook` est implémenté dans UPassport ([`routers/finance.py`](../UPassport/routers/finance.py)).
+
+> ⚠️ UPassport écoute en HTTPS sur le port **443** (via reverse proxy) ou **54321** en direct.
+> Pour une station exposée sous un domaine, utiliser le port 443 sans numéro explicite.
+
+Exemples :
 ```
+# Via reverse proxy HTTPS (recommandé)
+https://u.copylaradio.com/oc_webhook
+
+# Direct (si port 54321 exposé)
 https://votre-domaine:54321/oc_webhook
 ```
 
 ### 4.2 Configurer dans OC
 
-1. Admin du collectif → Webhooks
-2. Ajouter un webhook :
-   - **URL** : `https://votre-domaine:54321/oc_webhook`
-   - **Événement** : `collective.transaction.created`
+1. Admin du collectif OC → section **Webhooks**
+2. Cliquer **Ajouter un webhook** :
+   - **URL** : `https://u.copylaradio.com/oc_webhook`  *(adapté à votre domaine)*
+   - **Événement** : laisser sur **"tous les événements"** ou sélectionner `collective.transaction.created`
+3. Enregistrer — OC enverra un ping de test immédiatement
+
+> ✅ **Déjà configuré** pour `G1FabLab #monnaie-libre` sur `https://u.copylaradio.com/oc_webhook`
 
 ### 4.3 Fonctionnement du webhook
 
-Le webhook reçoit un payload minimal (sans email ni tier). Il résout ces informations
-via une requête GraphQL supplémentaire en utilisant le slug du contributeur :
+Le webhook reçoit un payload minimal (sans email ni tier détaillé). Il résout ces informations
+via une requête GraphQL supplémentaire utilisant le Personal Token (`OCAPIKEY`) :
 
 ```
-Webhook payload (slug, amount) → GraphQL (email + tier) → UPLANET.official.sh
+Webhook payload (slug, amount) → GraphQL OCAPIKEY → email + tier → UPLANET.official.sh
 ```
 
-Le tier est résolu en interrogeant les 5 dernières transactions du contributeur
-et en matchant le montant avec la transaction du webhook.
+Le tier est résolu en matchant le montant avec les 5 dernières transactions du contributeur.
+Le Personal Token doit donc être valide et avoir le scope `account` + `transactions`.
 
 ---
 
