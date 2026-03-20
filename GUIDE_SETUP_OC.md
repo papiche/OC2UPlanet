@@ -36,20 +36,22 @@ Exemple : `monnaie-libre/projects/coeurbox`
 
 Depuis l'admin du projet (`/admin/tiers`), créez exactement ces 4 tiers :
 
-#### Tier 1 : Satellite (sociétaire)
-- **Nom** : Parrainage Infrastructure Extension 128 Go
-- **Slug** : `parrainage-infrastructure-extension-128-go`
+#### Tier 1 : Love Box Le Claude — Satellite (sociétaire)
+- **Nom** : Love Box Le Claude
+- **Slug** : `love-box-le-claude`
+- **URL** : `https://opencollective.com/monnaie-libre/projects/coeurbox/contribute/love-box-le-claude-53061`
 - **Type** : Contribution récurrente
-- **Montant** : 50€/an (ou ~1€/sem)
-- **Description** : Parrainage d'une extension de stockage 128 Go sur une station UPlanet.
+- **Montant** : 50€/an (~1€/sem)
+- **Description** : Parrainage d'une **station entière 2 To NVMe minimum**.
   Le contributeur devient sociétaire de la SCIC et reçoit une ZEN Card.
 
-#### Tier 2 : Constellation (sociétaire)
-- **Nom** : Parrainage Infrastructure Module GPU
-- **Slug** : `parrainage-infrastructure-module-gpu-1-24`
+#### Tier 2 : Love Box Deluxe GPU — Constellation (sociétaire)
+- **Nom** : Love Box Deluxe GPU
+- **Slug** : `love-box-deluxe-gpu`
+- **URL** : `https://opencollective.com/monnaie-libre/projects/coeurbox/contribute/love-box-deluxe-gpu-49182`
 - **Type** : Contribution récurrente
 - **Montant** : 540€ / 3ans
-- **Description** : Parrainage d'un module GPU sur une constellation UPlanet.
+- **Description** : Parrainage d'un **Hub GPU 24 Go VRAM minimum** sur la constellation UPlanet.
   Le contributeur devient sociétaire de la SCIC et reçoit une ZEN Card.
 
 #### Tier 3 : Cloud Usage (locataire)

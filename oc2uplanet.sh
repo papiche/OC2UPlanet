@@ -201,18 +201,17 @@ dispatch_zen_emission() {
     local zen_amount=$(echo "scale=2; $amount * 1" | bc)
 
     case "$tier_slug" in
-        *parrainage*128-go*|*extension-128*|*satellite*)
-            ## Satellite 50€/an → process_societaire uniquement (ZEN Card → SCIC 33/33/33/1)
-            ## Le MULTIPASS reçoit son crédit initial lors de make_NOSTRCARD.sh (PRIMO TX)
-            ## Le montant offert est paramétré dans le DID Zen Economy de l'essaim
-            echo "  🛰 Satellite (${tier_slug}) → process_societaire"
+        *parrainage*128-go*|*extension-128*|*satellite*|*love-box-le-claude*|*love-box*claude*)
+            ## Satellite / Love Box Le Claude (50€/an) → process_societaire
+            ## Station entière 2To NVMe — ZEN Card → SCIC 33/33/33/1
+            echo "  🛰 Satellite / Love Box Le Claude (${tier_slug}) → process_societaire"
             ${ASTROPORT}/UPLANET.official.sh -s "${email}" -t satellite -m "${zen_amount}"
             return $?
             ;;
-        *parrainage*gpu*|*module-gpu*|*constellation*)
-            ## Constellation 540€/an → process_societaire uniquement (ZEN Card → SCIC 33/33/33/1)
-            ## Le MULTIPASS reçoit son crédit initial lors de make_NOSTRCARD.sh (PRIMO TX)
-            echo "  🌟 Constellation (${tier_slug}) → process_societaire"
+        *parrainage*gpu*|*module-gpu*|*constellation*|*love-box-deluxe*|*love-box*gpu*)
+            ## Constellation / Love Box Deluxe GPU (540€/3ans) → process_societaire
+            ## Hub GPU 24Go VRAM — ZEN Card → SCIC 33/33/33/1
+            echo "  🌟 Constellation / Love Box Deluxe GPU (${tier_slug}) → process_societaire"
             ${ASTROPORT}/UPLANET.official.sh -s "${email}" -t constellation -m "${zen_amount}"
             return $?
             ;;
