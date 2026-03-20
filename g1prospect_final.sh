@@ -1,12 +1,13 @@
 #!/bin/bash
 ########################################################################
-# Version: 0.3
+# Version: 0.4 (Duniter v2s migration)
 # License: AGPL-3.0 (https://choosealicense.com/licenses/agpl-3.0/)
 ########################################################################
-## G1 Prospect Database Builder (Final Version)
+## G1 Prospect Database Builder (Duniter v2s Edition)
 ########################################################################
-## Fetch Ğ1 WoT members and enrich with Cesium data
-## to build a prospect database for OC2UPlanet
+## Fetch Ğ1 WoT members via Squid GraphQL indexer (Duniter v2s)
+## and enrich with Cesium+ data to build a prospect database
+## for OC2UPlanet / AstroBot
 ########################################################################
 
 set -euo pipefail
@@ -52,7 +53,7 @@ cleanup_on_exit() {
     "created_date": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
     "updated_date": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
     "total_members": 0,
-    "source": "g1_wot_cesium"
+    "source": "g1_wot_v2s_squid"
   },
   "members": [
 EOF
@@ -92,7 +93,7 @@ EOF
     "created_date": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
     "updated_date": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
     "total_members": 0,
-    "source": "g1_wot_cesium"
+    "source": "g1_wot_v2s_squid"
   },
   "members": []
 }
@@ -106,7 +107,7 @@ EOF
     "created_date": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
     "updated_date": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
     "total_members": 0,
-    "source": "g1_wot_cesium"
+    "source": "g1_wot_v2s_squid"
   },
   "members": []
 }
@@ -122,10 +123,11 @@ EOF
 trap cleanup_on_exit INT TERM
 
 # Default configuration
-myCESIUM="https://g1.data.e-is.pro"  # Default Cesium API URL
+myCESIUM="https://g1.data.e-is.pro"  # Cesium+ API for profile enrichment
 PRESERVE_CACHE=false  # Option to preserve cache between runs
 
 # Parse command line arguments
+MEMBERS_FILE=""
 while [[ $# -gt 0 ]]; do
     case $1 in
         --preserve-cache)
@@ -145,141 +147,152 @@ done
 
 # Constants
 PROSPECT_FILE="$HOME/.zen/game/g1prospect.json"
-MEMBERS_FILE="${1:-}"
 TEMP_DIR="$HOME/.zen/tmp"
-G1_WOT_API="https://g1.duniter.org/wot/members"
+
+# Duniter v2s Squid indexer endpoints (GraphQL)
+# Fetched dynamically via duniter_getnode.sh, with hardcoded fallbacks
+DUNITER_GETNODE="${HOME}/.zen/Astroport.ONE/tools/duniter_getnode.sh"
+
+SQUID_FALLBACKS=(
+    "https://g1-squid.axiom-team.fr/v1/graphql"
+    "https://squid.g1.gyroi.de/v1/graphql"
+    "https://squid.g1.coinduf.eu/v1/graphql"
+    "https://g1-squid.asycn.io/v1/graphql"
+    "https://squid.g1.brussels.ovh/v1/graphql"
+)
 
 # Create necessary directories
 mkdir -p "$(dirname "$PROSPECT_FILE")"
 mkdir -p "$TEMP_DIR"
 
-# Function to check if a server is available
-check_server_availability() {
-    local server_url="$1"
-    local timeout="${2:-5}"
-    
-    echo "Checking server availability: $server_url"
-    
-    # Try to get basic info from the server
+########################################################################
+# Helper: execute a GraphQL query against the Squid indexer
+# Tries each squid endpoint until one succeeds.
+# $1 = compact JSON query payload
+# Outputs JSON response or returns 1 on failure
+########################################################################
+graphql_query() {
+    local payload="$1"
     local response
-    response=$(curl -s -m "$timeout" "$server_url" 2>/dev/null)
-    
-    if [[ -n "$response" ]]; then
-        # Check if it's valid JSON
-        if echo "$response" | jq empty 2>/dev/null; then
-            echo "Server is available and returns valid JSON"
-            return 0
-        else
-            echo "Server responded but returned invalid JSON"
-            return 1
-        fi
-    else
-        echo "Server is not responding"
-        return 1
+
+    # Build squid list: dynamic best node first, then fallbacks
+    local squids=()
+    if [[ -x "$DUNITER_GETNODE" ]]; then
+        local best_squid
+        best_squid=$("$DUNITER_GETNODE" squid 2>/dev/null || true)
+        [[ -n "$best_squid" ]] && squids+=("$best_squid")
     fi
+    for sq in "${SQUID_FALLBACKS[@]}"; do
+        squids+=("$sq")
+    done
+
+    for sq in "${squids[@]}"; do
+        response=$(curl -sf --max-time 30 \
+            -X POST "$sq" \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
+            --data "$payload" 2>/dev/null) || { echo "Squid $sq failed" >&2; continue; }
+
+        # Check for GraphQL errors
+        if echo "$response" | grep -q '"errors"'; then
+            echo "GraphQL error on $sq" >&2
+            continue
+        fi
+
+        # Check data is present
+        if echo "$response" | jq -e '.data' >/dev/null 2>&1; then
+            echo "$response"
+            return 0
+        fi
+
+        echo "No data in response from $sq" >&2
+    done
+
+    echo "ERROR: All squid endpoints failed" >&2
+    return 1
 }
 
-# Function to fetch Ğ1 members
+########################################################################
+# Fetch all active Ğ1 WoT members via Squid GraphQL (paginated)
+# Output: $TEMP_DIR/g1_members_raw.json
+#   Format: { "data": { "identities": { "nodes": [...], "totalCount": N } } }
+########################################################################
 fetch_g1_members() {
-    echo "Fetching Ğ1 WoT members..."
-    
+    echo "Fetching Ğ1 WoT members from Duniter v2s Squid indexer..."
+
+    # Allow pre-supplied members file (for testing / offline use)
     if [[ -n "$MEMBERS_FILE" ]] && [[ -f "$MEMBERS_FILE" ]]; then
         echo "Using provided members file: $MEMBERS_FILE"
         cp "$MEMBERS_FILE" "$TEMP_DIR/g1_members_raw.json"
         return 0
     fi
-    
-    # Try primary API first
-    echo "Fetching from primary Ğ1 WoT API: $G1_WOT_API"
-    if check_server_availability "$G1_WOT_API" 10; then
-        if curl -s -m 10 "$G1_WOT_API" > "$TEMP_DIR/g1_members_raw.json" 2>/dev/null; then
-            if [[ -s "$TEMP_DIR/g1_members_raw.json" ]] && jq empty "$TEMP_DIR/g1_members_raw.json" 2>/dev/null; then
-                echo "Primary API successful"
-                return 0
-            else
-                echo "Primary API returned invalid data"
-            fi
-        else
-            echo "Primary API failed"
+
+    local all_nodes="[]"
+    local offset=0
+    local page_size=1000
+    local total_count=0
+    local fetched=0
+    local page=0
+
+    while true; do
+        page=$((page + 1))
+        echo "Fetching page $page (offset=$offset, size=$page_size)..."
+
+        # GraphQL query: active WoT members, paginated
+        # Fields: name (=uid), accountId (=pubkey in SS58 g1 format), index (IdtyId)
+        local payload
+        payload=$(jq -cn \
+            --argjson first "$page_size" \
+            --argjson offset "$offset" \
+            '{query: "{ identities(filter:{isMember:{equalTo:true}},orderBy:INDEX_ASC,first:\($first),offset:\($offset)){nodes{name accountId index}totalCount} }"}' \
+            2>/dev/null || echo "{\"query\":\"{ identities(filter:{isMember:{equalTo:true}},orderBy:INDEX_ASC,first:${page_size},offset:${offset}){nodes{name accountId index}totalCount} }\"}")
+
+        local response
+        if ! response=$(graphql_query "$payload"); then
+            echo "ERROR: Failed to fetch WoT members from any squid endpoint"
+            return 1
         fi
-    else
-        echo "Primary API unavailable"
-    fi
-    
-    # Fallback: Use duniter_getnode.sh to find a working BMAS server
-    echo "Primary API unavailable, searching for working BMAS server..."
-    
-    # Get the path to duniter_getnode.sh
-    local duniter_getnode_script="$HOME/.zen/Astroport.ONE/tools/duniter_getnode.sh"
-    
-    if [[ ! -f "$duniter_getnode_script" ]]; then
-        echo "ERROR: duniter_getnode.sh not found at $duniter_getnode_script"
-        echo "Please ensure Astroport.ONE is properly installed"
-        return 1
-    fi
-    
-   
-    # Get a working BMAS server
-    echo "Running duniter_getnode.sh BMAS..."
-    local bmas_server
-    bmas_server=$("$duniter_getnode_script" "BMAS" | tail -n 1)
-    
-    if [[ -z "$bmas_server" ]]; then
-        echo "ERROR: No working BMAS server found"
-        return 1
-    fi
-    
-    echo "Found working BMAS server: $bmas_server"
-    
-    # Construct the WoT members API URL for the BMAS server
-    local wot_api_url
-    if [[ "$bmas_server" == *"https://"* ]]; then
-        wot_api_url="${bmas_server}/wot/members"
-    else
-        wot_api_url="https://${bmas_server}/wot/members"
-    fi
-    
-    echo "Fetching from BMAS server: $wot_api_url"
-    
-    # Try to fetch from the BMAS server
-    if check_server_availability "$wot_api_url" 15; then
-        if curl -s -m 15 "$wot_api_url" > "$TEMP_DIR/g1_members_raw.json" 2>/dev/null; then
-            if [[ -s "$TEMP_DIR/g1_members_raw.json" ]] && jq empty "$TEMP_DIR/g1_members_raw.json" 2>/dev/null; then
-                echo "BMAS server successful"
-                return 0
-            else
-                echo "BMAS server returned invalid data"
-            fi
-        else
-            echo "BMAS server failed"
+
+        # Extract nodes and totalCount from this page
+        local page_nodes
+        page_nodes=$(echo "$response" | jq '.data.identities.nodes // []')
+
+        local page_count
+        page_count=$(echo "$page_nodes" | jq 'length')
+
+        # Get total on first page
+        if [[ $page -eq 1 ]]; then
+            total_count=$(echo "$response" | jq '.data.identities.totalCount // 0')
+            echo "Total active WoT members reported by indexer: $total_count"
         fi
-    else
-        echo "BMAS server unavailable"
-    fi
-    
-    # Final fallback: try some known working servers
-    echo "Trying known working servers as final fallback..."
-    local fallback_servers=(
-        "https://duniter-v1.comunes.net/wot/members"
-        "https://g1.brussels.ovh/wot/members"
-        "https://g1.cgeek.fr/wot/members"
-        "https://g1.duniter.fr/wot/members"
-    )
-    
-    for server_url in "${fallback_servers[@]}"; do
-        echo "Trying fallback server: $server_url"
-        if check_server_availability "$server_url" 10; then
-            if curl -s -m 10 "$server_url" > "$TEMP_DIR/g1_members_raw.json" 2>/dev/null; then
-                if [[ -s "$TEMP_DIR/g1_members_raw.json" ]] && jq empty "$TEMP_DIR/g1_members_raw.json" 2>/dev/null; then
-                    echo "Fallback server successful: $server_url"
-                    return 0
-                fi
-            fi
+
+        if [[ "$page_count" -eq 0 ]]; then
+            echo "No more members to fetch (empty page)"
+            break
         fi
+
+        # Accumulate results
+        all_nodes=$(echo "$all_nodes $page_nodes" | jq -s '.[0] + .[1]')
+        fetched=$((fetched + page_count))
+        echo "Fetched $fetched / $total_count members so far..."
+
+        # Exit when all members fetched
+        if [[ "$fetched" -ge "$total_count" ]] || [[ "$page_count" -lt "$page_size" ]]; then
+            break
+        fi
+
+        offset=$((offset + page_size))
     done
-    
-    echo "ERROR: All servers failed. Cannot fetch Ğ1 WoT members."
-    return 1
+
+    # Write unified output file in a format convenient for process_all_members()
+    jq -n \
+        --argjson nodes "$all_nodes" \
+        --argjson total "$fetched" \
+        '{"data":{"identities":{"nodes":$nodes,"totalCount":$total}}}' \
+        > "$TEMP_DIR/g1_members_raw.json"
+
+    echo "Total WoT members fetched: $fetched"
+    return 0
 }
 
 # Function to display progress
@@ -297,7 +310,12 @@ show_progress() {
     printf "] %d%% (%d/%d)" "$percentage" "$current" "$total"
 }
 
-# Function to process all members
+########################################################################
+# Process all members from g1_members_raw.json and build g1prospect.json
+# Nodes format: { "name": "uid", "accountId": "SS58addr", "index": N }
+# Output members format: { "pubkey": "...", "uid": "...", ... }
+#   (pubkey/uid field names kept for AstroBot backward compatibility)
+########################################################################
 process_all_members() {
     echo "Processing members..."
     
@@ -305,7 +323,7 @@ process_all_members() {
     local new_members=0
     local total_members
     
-    total_members=$(jq '.results | length' "$TEMP_DIR/g1_members_raw.json")
+    total_members=$(jq '.data.identities.nodes | length' "$TEMP_DIR/g1_members_raw.json")
     echo "Total members to process: $total_members"
     
     # Initialize or load existing database
@@ -317,7 +335,7 @@ process_all_members() {
     "created_date": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
     "updated_date": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
     "total_members": 0,
-    "source": "g1_wot_cesium"
+    "source": "g1_wot_v2s_squid"
   },
   "members": []
 }
@@ -332,14 +350,14 @@ EOF
     echo "Creating lookup table of existing pubkeys..."
     jq -r '.members[].pubkey' "$PROSPECT_FILE" 2>/dev/null | sort > "$TEMP_DIR/existing_pubkeys.txt" || touch "$TEMP_DIR/existing_pubkeys.txt"
     
-    # Create cache directory for Cesium profile data
+    # Create cache directory for Cesium+ profile data
     local cache_dir="$TEMP_DIR/coucou"
     mkdir -p "$cache_dir"
     
     # Show existing cache statistics
     local existing_cache_count
     existing_cache_count=$(find "$cache_dir" -name "*.cesium.json" 2>/dev/null | wc -l)
-    echo "Found $existing_cache_count existing Cesium cache files"
+    echo "Found $existing_cache_count existing Cesium+ cache files"
     
     # Create a temporary file for new members
     local temp_new_members="$TEMP_DIR/new_members.json"
@@ -350,12 +368,14 @@ EOF
     local current_batch=0
     
     # Process each member
+    # Duniter v2s fields: accountId (=pubkey SS58), name (=uid), index
+    # Output fields: pubkey, uid (kept for AstroBot compatibility)
     while IFS= read -r member; do
         local pubkey
         local uid
         
-        pubkey=$(echo "$member" | jq -r '.pubkey')
-        uid=$(echo "$member" | jq -r '.uid')
+        pubkey=$(echo "$member" | jq -r '.accountId')
+        uid=$(echo "$member" | jq -r '.name')
         
         processed=$((processed + 1))
         
@@ -370,11 +390,10 @@ EOF
         # Check if member already exists using grep (much faster than jq)
         if grep -q "^$pubkey$" "$TEMP_DIR/existing_pubkeys.txt" 2>/dev/null; then
             echo "Member $uid already exists, skipping..."
-            # Skip delay for existing members to speed up processing
             continue
         fi
         
-        # Fetch profile data from Cesium (excluding avatar content to avoid corruption)
+        # Fetch profile data from Cesium+ (excluding avatar content to avoid corruption)
         local cesium_url="$myCESIUM/user/profile/$pubkey?_source_exclude=avatar._content"
         
         # Check cache first
@@ -392,6 +411,9 @@ EOF
         fi
         
         # Create new member object
+        # Note: pubkey/uid field names are preserved for AstroBot compatibility
+        #       pubkey = accountId (SS58 g1 address from Duniter v2s)
+        #       uid    = name (identity username from Duniter v2s)
         local new_member
         new_member=$(cat << EOF
     {
@@ -403,7 +425,9 @@ EOF
       "import_metadata": {
         "source_script": "g1prospect_final.sh",
         "import_date": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
-        "discovery_method": "wot_member_list"
+        "discovery_method": "wot_member_list",
+        "duniter_version": "v2s",
+        "indexer": "squid_graphql"
       }
     }
 EOF
@@ -429,12 +453,12 @@ EOF
             echo "Batch processed successfully"
         fi
         
-        # Random delay between 3-5 seconds to avoid being blacklisted (only for new members)
-        local delay=$((RANDOM % 3 + 3))  # Random number between 3-5
+        # Random delay between 3-5 seconds to avoid being blacklisted by Cesium+
+        local delay=$((RANDOM % 3 + 3))
         echo "Waiting $delay seconds before next request..."
         sleep $delay
         
-    done < <(jq -c '.results[]' "$TEMP_DIR/g1_members_raw.json")
+    done < <(jq -c '.data.identities.nodes[]' "$TEMP_DIR/g1_members_raw.json")
     
     # Process remaining members in the last batch
     if [[ $current_batch -gt 0 ]]; then
@@ -448,8 +472,10 @@ EOF
     local final_count
     final_count=$(jq '.members | length' "$PROSPECT_FILE")
     
-    # Update the total_members count
-    jq --arg count "$final_count" '.metadata.total_members = ($count | tonumber)' "$PROSPECT_FILE" > "$PROSPECT_FILE.new"
+    # Update the total_members count and source
+    jq --arg count "$final_count" \
+       '.metadata.total_members = ($count | tonumber) | .metadata.source = "g1_wot_v2s_squid"' \
+       "$PROSPECT_FILE" > "$PROSPECT_FILE.new"
     mv "$PROSPECT_FILE.new" "$PROSPECT_FILE"
     
     # Clean up temporary files
@@ -464,7 +490,7 @@ EOF
     # Show cache statistics
     local cache_files_count
     cache_files_count=$(find "$cache_dir" -name "*.cesium.json" 2>/dev/null | wc -l)
-    echo "Cesium cache files: $cache_files_count (preserved in $cache_dir)"
+    echo "Cesium+ cache files: $cache_files_count (preserved in $cache_dir)"
 }
 
 # Function to display statistics
@@ -497,6 +523,18 @@ show_statistics() {
         echo "Imported by gchange_prospect.sh: $gchange_count"
         echo "Unknown provenance: $unknown_count"
         
+        # Show Duniter version statistics
+        echo ""
+        echo "=== Duniter Version Statistics ==="
+        local v2s_count
+        local v1_count
+        
+        v2s_count=$(jq -r '.members[] | select(.import_metadata.duniter_version == "v2s") | .uid' "$PROSPECT_FILE" 2>/dev/null | wc -l)
+        v1_count=$(jq -r '.members[] | select(.import_metadata.duniter_version == null) | .uid' "$PROSPECT_FILE" 2>/dev/null | wc -l)
+        
+        echo "Imported via Duniter v2s (squid): $v2s_count"
+        echo "Imported via Duniter v1 (legacy): $v1_count"
+        
         # Show linked accounts statistics
         echo ""
         echo "=== Linked Accounts Statistics ==="
@@ -509,7 +547,7 @@ show_statistics() {
         echo "Cesium accounts discovered via Gchange: $gchange_linked_count"
         echo "Total accounts with known discovery method: $total_linked_count"
         
-        # Show linked accounts statistics
+        # Show Gchange linked accounts statistics
         echo ""
         echo "=== Gchange Linked Accounts Statistics ==="
         local gchange_linked_accounts
@@ -520,11 +558,6 @@ show_statistics() {
         
         echo "Cesium accounts with linked Gchange UIDs: $gchange_linked_accounts"
         echo "Accounts updated with Gchange information: $updated_accounts"
-        
-        # Show sample of Gchange-linked accounts
-        echo ""
-        echo "=== Sample Gchange-Linked Cesium Accounts ==="
-        jq -r '.members[] | select(.linked_accounts.gchange_uid != null) | "\(.uid) (\(.pubkey)) -> Gchange: \(.linked_accounts.gchange_uid)"' "$PROSPECT_FILE" 2>/dev/null | head -5 || echo "No Gchange-linked accounts found"
         
         # Show sample of members
         echo ""
@@ -537,23 +570,26 @@ show_statistics() {
 
 # Main execution
 main() {
-    echo "Starting G1 prospect database build (final version)..."
+    echo "Starting G1 prospect database build (Duniter v2s edition)..."
+    echo "Using Squid GraphQL indexer (replaces Duniter v1 REST API)"
+    echo ""
     
-    # Fetch Ğ1 members
+    # Fetch Ğ1 members via Squid GraphQL
     if ! fetch_g1_members; then
         echo ""
-        echo "ERROR: Failed to fetch Ğ1 WoT members from any available server."
+        echo "ERROR: Failed to fetch Ğ1 WoT members from any Squid indexer."
         echo ""
         echo "Troubleshooting steps:"
         echo "1. Check your internet connection"
-        echo "2. Verify that Astroport.ONE is properly installed"
-        echo "3. Try running manually: ~/.zen/Astroport.ONE/tools/duniter_getnode.sh BMAS"
-        echo "4. Check if any firewall is blocking the connections"
-        echo "5. Try again later (servers might be temporarily unavailable)"
+        echo "2. Run: ${DUNITER_GETNODE} squid  (to test indexer discovery)"
+        echo "3. Try a manual query:"
+        echo "   curl -X POST https://g1-squid.axiom-team.fr/v1/graphql \\"
+        echo "     -H 'Content-Type: application/json' \\"
+        echo "     -d '{\"query\":\"{ identities(filter:{isMember:{equalTo:true}},first:5){nodes{name accountId}totalCount} }\"}'"
+        echo "4. Check available squids: ${DUNITER_GETNODE} status"
         echo ""
         echo "If the problem persists, you can:"
-        echo "- Use a local members file: ./g1prospect_final.sh /path/to/members.json"
-        echo "- Check the Duniter network status"
+        echo "- Use a pre-downloaded members file: $0 /path/to/members.json"
         echo ""
         exit 1
     fi
@@ -565,22 +601,22 @@ main() {
     fi
     
     # Check if the JSON is valid and has the expected structure
-    if ! jq -e '.results' "$TEMP_DIR/g1_members_raw.json" >/dev/null 2>&1; then
-        echo "ERROR: Invalid JSON structure. Expected 'results' field not found."
-        echo "Server response structure:"
+    if ! jq -e '.data.identities.nodes' "$TEMP_DIR/g1_members_raw.json" >/dev/null 2>&1; then
+        echo "ERROR: Invalid JSON structure. Expected '.data.identities.nodes' not found."
+        echo "Actual structure:"
         jq keys "$TEMP_DIR/g1_members_raw.json" 2>/dev/null || echo "Invalid JSON"
         exit 1
     fi
     
     local member_count
-    member_count=$(jq '.results | length' "$TEMP_DIR/g1_members_raw.json" 2>/dev/null || echo "0")
+    member_count=$(jq '.data.identities.nodes | length' "$TEMP_DIR/g1_members_raw.json" 2>/dev/null || echo "0")
     
     if [[ "$member_count" -eq 0 ]]; then
         echo "ERROR: No members found in the response"
         exit 1
     fi
     
-    echo "Successfully fetched $member_count members from Ğ1 WoT"
+    echo "Successfully fetched $member_count members from Ğ1 WoT (Duniter v2s)"
     
     # Process all members
     process_all_members
@@ -589,8 +625,8 @@ main() {
     show_statistics
     
     echo ""
-    echo "=== G1 Prospect Database Build Complete ==="
+    echo "=== G1 Prospect Database Build Complete (Duniter v2s) ==="
 }
 
 # Run main function
-main "$@" 
+main "$@"

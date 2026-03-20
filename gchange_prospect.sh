@@ -64,9 +64,18 @@ TEMP_DIR="$HOME/.zen/tmp"
 # Gchange API
 GCHANGE_ADS_API="https://data.gchange.fr/market/record/_search"
 GCHANGE_USER_API_TPL="https://data.gchange.fr/user/profile"
-# Cesium/G1 API for cross-enrichment
-G1_WOT_API="https://g1.duniter.org/wot/members"
+# Cesium+ API for profile enrichment
 CESIUM_API="https://g1.data.e-is.pro"
+
+# Duniter v2s Squid indexer endpoints (GraphQL) — replaces v1 REST /wot/members
+DUNITER_GETNODE="${HOME}/.zen/Astroport.ONE/tools/duniter_getnode.sh"
+SQUID_FALLBACKS=(
+    "https://g1-squid.axiom-team.fr/v1/graphql"
+    "https://squid.g1.gyroi.de/v1/graphql"
+    "https://squid.g1.coinduf.eu/v1/graphql"
+    "https://g1-squid.asycn.io/v1/graphql"
+    "https://squid.g1.brussels.ovh/v1/graphql"
+)
 
 # --- Trap for graceful exit ---
 cleanup_on_exit() {
@@ -98,30 +107,118 @@ show_progress() {
 mkdir -p "$(dirname "$PROSPECT_FILE")"
 mkdir -p "$TEMP_DIR"
 
-# Fetches the Ğ1 WoT member list to resolve pubkeys to UIDs.
+########################################################################
+# Helper: execute a GraphQL query against the Squid indexer.
+# Tries each endpoint until one succeeds.
+# $1 = compact JSON query payload
+# Outputs JSON response or returns 1 on failure
+########################################################################
+graphql_query() {
+    local payload="$1"
+    local response
+
+    # Build squid list: dynamic best node first, then fallbacks
+    local squids=()
+    if [[ -x "$DUNITER_GETNODE" ]]; then
+        local best_squid
+        best_squid=$("$DUNITER_GETNODE" squid 2>/dev/null || true)
+        [[ -n "$best_squid" ]] && squids+=("$best_squid")
+    fi
+    for sq in "${SQUID_FALLBACKS[@]}"; do
+        squids+=("$sq")
+    done
+
+    for sq in "${squids[@]}"; do
+        response=$(curl -sf --max-time 30 \
+            -X POST "$sq" \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
+            --data "$payload" 2>/dev/null) || { echo "Squid $sq failed" >&2; continue; }
+
+        if echo "$response" | grep -q '"errors"'; then
+            echo "GraphQL error on $sq" >&2
+            continue
+        fi
+
+        if echo "$response" | jq -e '.data' >/dev/null 2>&1; then
+            echo "$response"
+            return 0
+        fi
+    done
+
+    echo "ERROR: All squid endpoints failed" >&2
+    return 1
+}
+
+########################################################################
+# Fetch the Ğ1 WoT member list to resolve pubkeys (accountId) to UIDs (name).
+# Uses Duniter v2s Squid GraphQL instead of the deprecated v1 REST API.
 # Caches the data for 1 hour to avoid excessive requests.
+# Output file format: { "data": { "identities": { "nodes": [ {name, accountId, index} ] } } }
+########################################################################
 fetch_g1_wot_data() {
     local wot_file="$TEMP_DIR/g1_wot_data.json"
-    # Check for cached data less than 60 minutes old.
-    if [ -f "$wot_file" ]; then
-        local now
+
+    # Check for cached data less than 60 minutes old
+    if [[ -f "$wot_file" ]]; then
+        local now file_mod_time
         now=$(date +%s)
-        local file_mod_time
         file_mod_time=$(stat -c %Y "$wot_file")
         if (( (now - file_mod_time) < 3600 )); then
             echo "Using cached Ğ1 WoT data (less than 1 hour old)."
-            return
+            return 0
         fi
     fi
 
-    echo "Fetching/Refreshing Ğ1 WoT members list..."
-    if curl -# -sk -o "$wot_file" "$G1_WOT_API"; then
-        echo "Ğ1 WoT data fetched successfully."
-    else
-        echo "ERROR: Failed to fetch Ğ1 WoT data. Cesium account enrichment will be skipped for this run."
-        # Create an empty file to avoid re-fetching on every ad.
-        echo '{ "results": [] }' > "$wot_file"
-    fi
+    echo "Fetching/Refreshing Ğ1 WoT members list (Duniter v2s Squid GraphQL)..."
+
+    local all_nodes="[]"
+    local offset=0
+    local page_size=1000
+    local total_count=0
+    local page=0
+
+    while true; do
+        page=$((page + 1))
+        local payload
+        payload="{\"query\":\"{ identities(filter:{isMember:{equalTo:true}},orderBy:INDEX_ASC,first:${page_size},offset:${offset}){nodes{name accountId index}totalCount} }\"}"
+
+        local response
+        if ! response=$(graphql_query "$payload"); then
+            echo "ERROR: Failed to fetch Ğ1 WoT data. Cesium account enrichment will be skipped."
+            # Write empty structure compatible with new jq queries
+            echo '{"data":{"identities":{"nodes":[],"totalCount":0}}}' > "$wot_file"
+            return 1
+        fi
+
+        local page_nodes
+        page_nodes=$(echo "$response" | jq '.data.identities.nodes // []')
+        local page_count
+        page_count=$(echo "$page_nodes" | jq 'length')
+
+        if [[ $page -eq 1 ]]; then
+            total_count=$(echo "$response" | jq '.data.identities.totalCount // 0')
+            echo "Total WoT members: $total_count"
+        fi
+
+        [[ "$page_count" -eq 0 ]] && break
+
+        all_nodes=$(echo "$all_nodes $page_nodes" | jq -s '.[0] + .[1]')
+        local fetched
+        fetched=$(echo "$all_nodes" | jq 'length')
+        echo "Fetched $fetched / $total_count..."
+
+        [[ "$fetched" -ge "$total_count" ]] || [[ "$page_count" -lt "$page_size" ]] && break
+        offset=$((offset + page_size))
+    done
+
+    jq -n \
+        --argjson nodes "$all_nodes" \
+        --argjson total "$(echo "$all_nodes" | jq 'length')" \
+        '{"data":{"identities":{"nodes":$nodes,"totalCount":$total}}}' \
+        > "$wot_file"
+
+    echo "Ğ1 WoT data fetched and cached: $(echo "$all_nodes" | jq 'length') members."
 }
 
 # Fetches lightweight metadata for ads with configurable size and time period
@@ -239,10 +336,12 @@ EOF
     
     echo "    -> Pubkey not in G1 database. Adding it..."
 
-    # Find the corresponding UID from the WoT data
+    # Find the corresponding UID (name) from the WoT data (Duniter v2s Squid format)
+    # accountId = pubkey SS58 g1, name = uid
     local wot_file="$TEMP_DIR/g1_wot_data.json"
     local cesium_uid
-    cesium_uid=$(jq -r --arg pk "$cesium_pubkey" '.results[] | select(.pubkey == $pk) | .uid' "$wot_file")
+    cesium_uid=$(jq -r --arg pk "$cesium_pubkey" \
+        '.data.identities.nodes[] | select(.accountId == $pk) | .name' "$wot_file" 2>/dev/null || true)
 
     # Fetch the full Cesium profile with cache
     local cesium_cache_dir="$TEMP_DIR/coucou"
