@@ -227,7 +227,11 @@ fetch_g1_members() {
         return 0
     fi
 
-    local all_nodes="[]"
+    # Use a NDJSON temp file to accumulate nodes page by page
+    # (avoids "Argument list too long" when shell vars exceed ARG_MAX with 7000+ members)
+    local nodes_ndjson="$TEMP_DIR/g1_wot_nodes.ndjson"
+    > "$nodes_ndjson"   # truncate/create
+
     local offset=0
     local page_size=1000
     local total_count=0
@@ -239,13 +243,8 @@ fetch_g1_members() {
         echo "Fetching page $page (offset=$offset, size=$page_size)..."
 
         # GraphQL query: active WoT members, paginated
-        # Fields: name (=uid), accountId (=pubkey in SS58 g1 format), index (IdtyId)
-        local payload
-        payload=$(jq -cn \
-            --argjson first "$page_size" \
-            --argjson offset "$offset" \
-            '{query: "{ identities(filter:{isMember:{equalTo:true}},orderBy:INDEX_ASC,first:\($first),offset:\($offset)){nodes{name accountId index}totalCount} }"}' \
-            2>/dev/null || echo "{\"query\":\"{ identities(filter:{isMember:{equalTo:true}},orderBy:INDEX_ASC,first:${page_size},offset:${offset}){nodes{name accountId index}totalCount} }\"}")
+        # Fields: name (=uid), accountId (=pubkey SS58 g1), index (IdtyId)
+        local payload="{\"query\":\"{ identities(filter:{isMember:{equalTo:true}},orderBy:INDEX_ASC,first:${page_size},offset:${offset}){nodes{name accountId index}totalCount} }\"}"
 
         local response
         if ! response=$(graphql_query "$payload"); then
@@ -253,12 +252,8 @@ fetch_g1_members() {
             return 1
         fi
 
-        # Extract nodes and totalCount from this page
-        local page_nodes
-        page_nodes=$(echo "$response" | jq '.data.identities.nodes // []')
-
         local page_count
-        page_count=$(echo "$page_nodes" | jq 'length')
+        page_count=$(echo "$response" | jq '.data.identities.nodes | length')
 
         # Get total on first page
         if [[ $page -eq 1 ]]; then
@@ -271,8 +266,9 @@ fetch_g1_members() {
             break
         fi
 
-        # Accumulate results
-        all_nodes=$(echo "$all_nodes $page_nodes" | jq -s '.[0] + .[1]')
+        # Append each node as a single JSON line (NDJSON) — no huge shell variables
+        echo "$response" | jq -c '.data.identities.nodes[]' >> "$nodes_ndjson"
+
         fetched=$((fetched + page_count))
         echo "Fetched $fetched / $total_count members so far..."
 
@@ -284,12 +280,15 @@ fetch_g1_members() {
         offset=$((offset + page_size))
     done
 
-    # Write unified output file in a format convenient for process_all_members()
+    # Build the final unified JSON from the NDJSON file
+    # jq --slurpfile reads each JSON line as an element of an array → $nodes
     jq -n \
-        --argjson nodes "$all_nodes" \
         --argjson total "$fetched" \
+        --slurpfile nodes "$nodes_ndjson" \
         '{"data":{"identities":{"nodes":$nodes,"totalCount":$total}}}' \
         > "$TEMP_DIR/g1_members_raw.json"
+
+    rm -f "$nodes_ndjson"
 
     echo "Total WoT members fetched: $fetched"
     return 0

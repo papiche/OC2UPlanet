@@ -172,29 +172,30 @@ fetch_g1_wot_data() {
 
     echo "Fetching/Refreshing Ğ1 WoT members list (Duniter v2s Squid GraphQL)..."
 
-    local all_nodes="[]"
+    # Use a NDJSON temp file to avoid "Argument list too long" with 7000+ members
+    local nodes_ndjson="${wot_file%.json}.ndjson"
+    > "$nodes_ndjson"
+
     local offset=0
     local page_size=1000
     local total_count=0
+    local fetched=0
     local page=0
 
     while true; do
         page=$((page + 1))
-        local payload
-        payload="{\"query\":\"{ identities(filter:{isMember:{equalTo:true}},orderBy:INDEX_ASC,first:${page_size},offset:${offset}){nodes{name accountId index}totalCount} }\"}"
+        local payload="{\"query\":\"{ identities(filter:{isMember:{equalTo:true}},orderBy:INDEX_ASC,first:${page_size},offset:${offset}){nodes{name accountId index}totalCount} }\"}"
 
         local response
         if ! response=$(graphql_query "$payload"); then
             echo "ERROR: Failed to fetch Ğ1 WoT data. Cesium account enrichment will be skipped."
-            # Write empty structure compatible with new jq queries
             echo '{"data":{"identities":{"nodes":[],"totalCount":0}}}' > "$wot_file"
+            rm -f "$nodes_ndjson"
             return 1
         fi
 
-        local page_nodes
-        page_nodes=$(echo "$response" | jq '.data.identities.nodes // []')
         local page_count
-        page_count=$(echo "$page_nodes" | jq 'length')
+        page_count=$(echo "$response" | jq '.data.identities.nodes | length')
 
         if [[ $page -eq 1 ]]; then
             total_count=$(echo "$response" | jq '.data.identities.totalCount // 0')
@@ -203,22 +204,25 @@ fetch_g1_wot_data() {
 
         [[ "$page_count" -eq 0 ]] && break
 
-        all_nodes=$(echo "$all_nodes $page_nodes" | jq -s '.[0] + .[1]')
-        local fetched
-        fetched=$(echo "$all_nodes" | jq 'length')
+        # Append each node as a single JSON line (NDJSON)
+        echo "$response" | jq -c '.data.identities.nodes[]' >> "$nodes_ndjson"
+
+        fetched=$((fetched + page_count))
         echo "Fetched $fetched / $total_count..."
 
         [[ "$fetched" -ge "$total_count" ]] || [[ "$page_count" -lt "$page_size" ]] && break
         offset=$((offset + page_size))
     done
 
+    # Assemble final JSON using --slurpfile (reads NDJSON into an array)
     jq -n \
-        --argjson nodes "$all_nodes" \
-        --argjson total "$(echo "$all_nodes" | jq 'length')" \
+        --argjson total "$fetched" \
+        --slurpfile nodes "$nodes_ndjson" \
         '{"data":{"identities":{"nodes":$nodes,"totalCount":$total}}}' \
         > "$wot_file"
 
-    echo "Ğ1 WoT data fetched and cached: $(echo "$all_nodes" | jq 'length') members."
+    rm -f "$nodes_ndjson"
+    echo "Ğ1 WoT data fetched and cached: $fetched members."
 }
 
 # Fetches lightweight metadata for ads with configurable size and time period
