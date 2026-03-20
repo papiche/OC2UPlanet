@@ -320,6 +320,7 @@ process_all_members() {
     
     local processed=0
     local new_members=0
+    local migrated_v1=0
     local total_members
     
     total_members=$(jq '.data.identities.nodes | length' "$TEMP_DIR/g1_members_raw.json")
@@ -345,9 +346,13 @@ EOF
         echo "Found $existing_count existing members"
     fi
     
-    # Create a lookup table of existing pubkeys (much faster than checking one by one)
-    echo "Creating lookup table of existing pubkeys..."
+    # Lookup table 1: existing SS58 pubkeys (v2s already migrated)
+    echo "Creating lookup tables (pubkeys + uids)..."
     jq -r '.members[].pubkey' "$PROSPECT_FILE" 2>/dev/null | sort > "$TEMP_DIR/existing_pubkeys.txt" || touch "$TEMP_DIR/existing_pubkeys.txt"
+    
+    # Lookup table 2: uid → pubkey mapping (to detect v1 members by their uid)
+    # Format: "uid<TAB>pubkey" — used to migrate v1 pubkeys to v2s SS58
+    jq -r '.members[] | [.uid, .pubkey] | @tsv' "$PROSPECT_FILE" 2>/dev/null | sort > "$TEMP_DIR/uid_to_pubkey.tsv" || touch "$TEMP_DIR/uid_to_pubkey.tsv"
     
     # Create cache directory for Cesium+ profile data
     local cache_dir="$TEMP_DIR/coucou"
@@ -367,8 +372,8 @@ EOF
     local current_batch=0
     
     # Process each member
-    # Duniter v2s fields: accountId (=pubkey SS58), name (=uid), index
-    # Output fields: pubkey, uid (kept for AstroBot compatibility)
+    # Duniter v2s fields: accountId (=pubkey SS58 g1), name (=uid), index
+    # Output fields: pubkey, uid (kept for AstroBot backward compatibility)
     while IFS= read -r member; do
         local pubkey
         local uid
@@ -386,11 +391,45 @@ EOF
         
         echo "Processing member $processed/$total_members: $uid ($pubkey)"
         
-        # Check if member already exists using grep (much faster than jq)
-        if grep -q "^$pubkey$" "$TEMP_DIR/existing_pubkeys.txt" 2>/dev/null; then
-            echo "Member $uid already exists, skipping..."
+        # ── Check 1: Already present with v2s SS58 pubkey → skip ──────────
+        if grep -q "^${pubkey}$" "$TEMP_DIR/existing_pubkeys.txt" 2>/dev/null; then
+            echo "Member $uid already up-to-date (v2s pubkey), skipping..."
             continue
         fi
+        
+        # ── Check 2: Exists with old v1 pubkey (same uid) → migrate ───────
+        # Duniter v1 used base58 pubkeys; v2s uses SS58 g1-prefixed addresses.
+        # The uid (username) is stable across the migration.
+        if grep -q "^${uid}	" "$TEMP_DIR/uid_to_pubkey.tsv" 2>/dev/null; then
+            local old_pubkey
+            old_pubkey=$(grep "^${uid}	" "$TEMP_DIR/uid_to_pubkey.tsv" | head -1 | cut -f2)
+            echo "  → Migrating v1→v2s: $uid  old=$old_pubkey  new=$pubkey"
+            
+            # Update the existing record: new pubkey SS58, preserve old as pubkey_v1
+            jq --arg old "$old_pubkey" \
+               --arg new "$pubkey" \
+               --arg date "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+               '(.members[] | select(.pubkey == $old)) |= . + {
+                   "pubkey": $new,
+                   "pubkey_v1": $old,
+                   "import_metadata": ((.import_metadata // {}) + {
+                       "duniter_version": "v2s",
+                       "indexer": "squid_graphql",
+                       "v2s_migration_date": $date
+                   })
+               } | .metadata.updated_date = $date' \
+               "$PROSPECT_FILE" > "$PROSPECT_FILE.new"
+            mv "$PROSPECT_FILE.new" "$PROSPECT_FILE"
+            
+            # Update lookup tables so duplicates are not processed again
+            sed -i "s|^${old_pubkey}$|${pubkey}|" "$TEMP_DIR/existing_pubkeys.txt"
+            sed -i "s|^${uid}	.*|${uid}	${pubkey}|" "$TEMP_DIR/uid_to_pubkey.tsv"
+            
+            migrated_v1=$((migrated_v1 + 1))
+            continue
+        fi
+        
+        # ── Check 3: Truly new member → add to database ───────────────────
         
         # Fetch profile data from Cesium+ (excluding avatar content to avoid corruption)
         local cesium_url="$myCESIUM/user/profile/$pubkey?_source_exclude=avatar._content"
@@ -478,13 +517,16 @@ EOF
     mv "$PROSPECT_FILE.new" "$PROSPECT_FILE"
     
     # Clean up temporary files
-    rm -f "$temp_new_members" "$TEMP_DIR/existing_pubkeys.txt"
+    rm -f "$temp_new_members" "$TEMP_DIR/existing_pubkeys.txt" "$TEMP_DIR/uid_to_pubkey.tsv"
     
     # Note: Cache files in $cache_dir are preserved for future use
     
-    echo "Processing complete. New members: $new_members"
+    echo ""
+    echo "=== Processing Summary ==="
+    echo "  New members added    : $new_members"
+    echo "  v1→v2s pubkey migrated: $migrated_v1"
+    echo "  Total in database    : $final_count"
     echo "Prospect database updated: $PROSPECT_FILE"
-    echo "Total members in database: $final_count"
     
     # Show cache statistics
     local cache_files_count
