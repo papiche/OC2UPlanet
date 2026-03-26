@@ -41,20 +41,9 @@ echo "API key : ${OCAPIKEY:0:8}…"
 ## UPLANET SECRETS & ORIGIN DETECTION
 #######################################################################
 UPLANETNAME="$(cat ~/.ipfs/swarm.key 2>/dev/null | tail -n 1)"
-ORIGIN_KEY="0000000000000000000000000000000000000000000000000000000000000000"
 
 ## Si OC_API est explicitement défini dans .env → le respecter toujours
-## Sinon, auto-détecter selon swarm.key (staging si ORIGIN, prod sinon)
-if [[ -n "${OC_API}" ]]; then
-    ## OC_API forcé via .env — priorité absolue
-    IS_ORIGIN=0
-    echo "✅ OC_API forcé via .env : ${OC_API}"
-elif [[ "$UPLANETNAME" == "$ORIGIN_KEY" || -z "$UPLANETNAME" ]]; then
-    IS_ORIGIN=1
-    OC_API="https://api-staging.opencollective.com/graphql/v2"
-    echo "⚠ MODE ORIGIN (DEV) — Using OC staging API"
-else
-    IS_ORIGIN=0
+if [[ -z "${OC_API}" ]]; then
     OC_API="https://api.opencollective.com/graphql/v2"
     echo "✅ MODE PRODUCTION — Using OC production API"
 fi
@@ -65,7 +54,7 @@ if [[ -z $UPLANETNAME ]]; then
     echo "MISSING PRIVATE SWARM ACTIVATED ASTROPORT STATION"
     exit 1
 fi
-## CLEAN OLD data
+## CLEAN older than yesterday data
 find ./data -mtime +1 -type f -exec rm '{}' \;
 
 ## DEFINE TIME
