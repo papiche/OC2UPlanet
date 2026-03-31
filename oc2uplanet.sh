@@ -60,6 +60,7 @@ find ./data -mtime +1 -type f -exec rm '{}' \;
 ## DEFINE TIME
 # Get today's date in the format YYYY-MM-DD
 today=$(date +"%Y-%m-%d")
+yesterday=$(date -d "yesterday" +"%Y-%m-%d")
 # Début du mois en cours
 start_of_month=$(date -d "$(date +%Y-%m-01)" +"%Y-%m-%d")
 # Début du mois dernier
@@ -178,7 +179,10 @@ MY_PATH="$(cd "$(dirname "$0")" && pwd)"
 ASTROPORT="$HOME/.zen/Astroport.ONE"
 EMISSION_LOG="./data/emission.log"
 touch "$EMISSION_LOG"
-
+last_run=$(tail -1 "$EMISSION_LOG" | cut -d: -f4 2>/dev/null || echo 0)
+# Garder seulement les 90 derniers jours
+find ./data -name "emission.log" -newer <(date -d "90 days ago") -o \
+  -exec tail -n 10000 {} > /tmp/emission.tmp \; && mv /tmp/emission.tmp {}
 ## Map OC tier slug → UPLANET.official.sh command
 ## OC tier slugs (from opencollective.com/monnaie-libre/projects/coeurbox/contribute/):
 ##   parrainage-infrastructure-extension-128-go  → Satellite sociétaire (ZEN Card → SCIC 33/33/33/1)
