@@ -42,6 +42,14 @@ if [[ -z "${OCAPIKEY}" && -f "${COOP_CONFIG}" ]]; then
 fi
 [[ -z "${OC_API}" ]] && OC_API="https://api.opencollective.com/graphql/v2"
 
+## Station variables (CAPTAINEMAIL, uSPOT, myDOMAIN, myIPFS…)
+[[ -z "$myDOMAIN" && -f "${ASTROPORT}/tools/my.sh" ]] && source "${ASTROPORT}/tools/my.sh" 2>/dev/null
+
+INVITATION_LOG="./data/invitation.log"
+touch "$INVITATION_LOG"
+## Email du capitaine (destinataire des tiers labo/R&D)
+CAPTAIN_TARGET="${CAPTAINEMAIL:-$(cat ~/.zen/game/players/.current/.player 2>/dev/null)}"
+
 show_help() {
     echo "Usage: $0 [OPTIONS]"
     echo ""
@@ -259,10 +267,90 @@ dispatch_zen_emission() {
         *parrainage*gpu*|*module-gpu*|*constellation*|*love-box-deluxe*|*love-box*gpu*)
             ${ASTROPORT}/UPLANET.official.sh -s "${email}" -t constellation -m "${zen_amount}"
             return $? ;;
+        *infrastructure*|*labo*|*genereux-donateur*|*r-d*|*recherche*)
+            ## Dons fléchés vers le MULTIPASS du Capitaine (labo / R&D qo-op)
+            local cap="${CAPTAIN_TARGET:-support@qo-op.com}"
+            [[ "$JSON_OUTPUT" == "false" ]] && echo "→ Tier labo/R&D : routage vers MULTIPASS capitaine ${cap}"
+            ${ASTROPORT}/UPLANET.official.sh -l "${cap}" -m "${zen_amount}"
+            return $? ;;
         *)
             ${ASTROPORT}/UPLANET.official.sh -l "${email}" -m "${zen_amount}"
             return $? ;;
     esac
+}
+
+_send_multipass_invitation() {
+    local email="$1" amount="$2" tier_slug="$3"
+
+    ## Idempotence mensuelle : une seule invitation par email par mois
+    local month_key="${email}:$(date +%Y-%m)"
+    grep -qF "$month_key" "$INVITATION_LOG" 2>/dev/null && return 0
+
+    local captain_npub=""
+    [[ -n "$CAPTAIN_TARGET" ]] && captain_npub=$(cat ~/.zen/game/nostr/${CAPTAIN_TARGET}/NPUB 2>/dev/null)
+
+    local station_url="${uSPOT:-https://${myDOMAIN}}"
+    local profile_url="${station_url}/nostr_profile_viewer.html"
+    [[ -n "$captain_npub" ]] && profile_url="${profile_url}?npub=${captain_npub}"
+
+    local tmp_html
+    tmp_html=$(mktemp /tmp/oc_invitation_XXXXXX.html)
+    cat > "$tmp_html" << HTMLEOF
+<div style="font-family:sans-serif;max-width:600px;margin:0 auto;color:#222">
+  <h2>🌍 Votre contribution sur UPlanet</h2>
+  <p>Bonjour,</p>
+  <p>Nous avons bien reçu votre contribution de <strong>${amount}&nbsp;€</strong>
+     (offre&nbsp;: <em>${tier_slug:-standard}</em>) sur OpenCollective — merci !</p>
+  <p>Pour convertir votre don en <strong>Ẑen</strong> et accéder à votre portefeuille
+     coopératif, vous devez posséder un <strong>MULTIPASS UPlanet</strong> associé
+     à l'adresse email que vous avez utilisée sur OpenCollective.</p>
+  <hr style="border:none;border-top:1px solid #ddd;margin:20px 0">
+  <h3>🎫 Créer votre MULTIPASS</h3>
+  <p>Votre Capitaine administre la station qui hébergera votre identité souveraine
+     sur le réseau NOSTR d'UPlanet. Consultez son profil et choisissez votre Astroport&nbsp;:</p>
+  <p style="text-align:center;margin:24px 0">
+    <a href="${profile_url}"
+       style="background:#2980b9;color:white;padding:12px 24px;border-radius:8px;
+              text-decoration:none;font-weight:bold;display:inline-block">
+      👤 Voir le MULTIPASS du Capitaine
+    </a>
+  </p>
+  <p style="text-align:center;margin:16px 0">
+    <a href="${station_url}"
+       style="background:#27ae60;color:white;padding:12px 24px;border-radius:8px;
+              text-decoration:none;font-weight:bold;display:inline-block">
+      🚀 Accéder à la station UPlanet
+    </a>
+  </p>
+  <hr style="border:none;border-top:1px solid #ddd;margin:20px 0">
+  <p style="font-size:0.88em;color:#555">
+    ⚠️ <strong>Important&nbsp;:</strong> lors de la création de votre MULTIPASS,
+    utilisez exactement l'adresse email <code>${email}</code> — la même que sur
+    OpenCollective — pour que votre contribution de <strong>${amount}&nbsp;Ẑ</strong>
+    soit créditée automatiquement.
+  </p>
+</div>
+HTMLEOF
+
+    if [[ -x "${ASTROPORT}/tools/mailjet.sh" ]]; then
+        "${ASTROPORT}/tools/mailjet.sh" \
+            --template "$0" \
+            --expire 7d \
+            "${email}" \
+            "${tmp_html}" \
+            "Votre contribution UPlanet — créez votre MULTIPASS"
+        local rc=$?
+        rm -f "$tmp_html"
+        if [[ $rc -eq 0 ]]; then
+            echo "${month_key}:${amount}:INVITED:$(date +%s)" >> "$INVITATION_LOG"
+            [[ "$JSON_OUTPUT" == "false" ]] && echo "📧 Invitation envoyée à ${email} (${amount} €)"
+        else
+            [[ "$JSON_OUTPUT" == "false" ]] && echo "⚠️  Échec envoi invitation à ${email} (mailjet rc=$rc)"
+        fi
+    else
+        rm -f "$tmp_html"
+        [[ "$JSON_OUTPUT" == "false" ]] && echo "⚠️  mailjet.sh introuvable — invitation non envoyée pour ${email}"
+    fi
 }
 
 [[ "$JSON_OUTPUT" == "false" ]] && echo "=== Processing current month credits ==="
@@ -279,7 +367,25 @@ while IFS= read -r credit_json; do
 
     tx_id="${email}:${amount}:${created_at}"
     grep -qF "$tx_id" "$EMISSION_LOG" 2>/dev/null && continue
-    [[ ! -f "$HOME/.zen/game/nostr/${email}/G1PUBNOSTR" ]] && continue
+
+    ## Routage des tiers labo/R&D : l'email cible est le Capitaine, pas le donateur
+    _effective_email="$email"
+    case "$tier_slug" in
+        *infrastructure*|*labo*|*genereux-donateur*|*r-d*|*recherche*)
+            _effective_email="${CAPTAIN_TARGET:-support@qo-op.com}" ;;
+    esac
+
+    ## Vérification MULTIPASS : local d'abord, puis swarm
+    if [[ ! -f "$HOME/.zen/game/nostr/${_effective_email}/G1PUBNOSTR" ]]; then
+        _swarm_hit=$(find ~/.zen/tmp/swarm -name "G1PUBNOSTR" 2>/dev/null | grep -F "/${_effective_email}/" | head -1)
+        if [[ -z "$_swarm_hit" ]]; then
+            [[ "$JSON_OUTPUT" == "false" ]] && echo "⚠️  MULTIPASS introuvable pour ${_effective_email} — invitation en cours"
+            _send_multipass_invitation "${_effective_email}" "${amount}" "${tier_slug}"
+        else
+            [[ "$JSON_OUTPUT" == "false" ]] && echo "ℹ️  MULTIPASS de ${_effective_email} présent dans le swarm (${_swarm_hit})"
+        fi
+        continue
+    fi
 
     if [[ "$MANUAL_MODE" == "true" ]]; then
         echo "------------------------------------------------"
