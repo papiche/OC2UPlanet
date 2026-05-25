@@ -10,9 +10,9 @@
 ########################################################################
 ## INIT
 ASTROPORT="${HOME}/.zen/Astroport.ONE"
-EMISSION_LOG="./data/emission.log"
 MY_PATH="$(cd "$(dirname "$0")" && pwd)"
-mkdir -p ./data
+EMISSION_LOG="${MY_PATH}/data/emission.log"
+mkdir -p "${MY_PATH}/data"
 touch "$EMISSION_LOG"
 
 # NOTE: .env is NO LONGER loaded locally. We rely on NOSTR/DID or explicit exports.
@@ -45,7 +45,7 @@ fi
 ## Station variables (CAPTAINEMAIL, uSPOT, myDOMAIN, myIPFS…)
 [[ -z "$myDOMAIN" && -f "${ASTROPORT}/tools/my.sh" ]] && source "${ASTROPORT}/tools/my.sh" 2>/dev/null
 
-INVITATION_LOG="./data/invitation.log"
+INVITATION_LOG="${MY_PATH}/data/invitation.log"
 touch "$INVITATION_LOG"
 ## Email du capitaine (destinataire des tiers labo/R&D)
 CAPTAIN_TARGET="${CAPTAINEMAIL:-$(cat ~/.zen/game/players/.current/.player 2>/dev/null)}"
@@ -75,9 +75,9 @@ show_history() {
 }
 
 show_status() {
-    local total_backers=$(jq -r ".data.account.members.totalCount // 0" data/backers.json 2>/dev/null)
-    local count=$(jq -s "length" data/current_month.credit.json 2>/dev/null)
-    local total_amount=$(jq -s "[.[] | .amount.value] | add // 0" data/current_month.credit.json 2>/dev/null)
+    local total_backers=$(jq -r ".data.account.members.totalCount // 0" ${MY_PATH}/data/backers.json 2>/dev/null)
+    local count=$(jq -s "length" ${MY_PATH}/data/current_month.credit.json 2>/dev/null)
+    local total_amount=$(jq -s "[.[] | .amount.value] | add // 0" ${MY_PATH}/data/current_month.credit.json 2>/dev/null)
     local processed=$(grep -c ":OK$" "$EMISSION_LOG" 2>/dev/null)
 
     if [[ "$JSON_OUTPUT" == "true" ]]; then
@@ -99,40 +99,40 @@ fetch_oc_data() {
     # Backers list
     curl -sX POST -H "Content-Type: application/json" -H "Personal-Token: ${OCAPIKEY}" \
         -d "{\"query\": \"query account(\$slug: String) { account(slug: \$slug) { name slug members(role: BACKER, limit: 200) { totalCount nodes { account { name slug emails } } } } }\", \"variables\": {\"slug\": \"${OCSLUG}\"}}" \
-        "${OC_API}" > data/backers.json
+        "${OC_API}" > ${MY_PATH}/data/backers.json
 
     # Slug email map
-    jq -r '.data.account.members.nodes[] | "\(.account.slug):\(.account.emails[0])"' data/backers.json > data/slugemail.list
-    cat data/slugemail.list | awk -F: '{print "{\"" $1 "\": \"" $2 "\"}"}' | jq -s 'add' > data/slug_email_map.json
+    jq -r '.data.account.members.nodes[] | "\(.account.slug):\(.account.emails[0])"' ${MY_PATH}/data/backers.json > ${MY_PATH}/data/slugemail.list
+    cat ${MY_PATH}/data/slugemail.list | awk -F: '{print "{\"" $1 "\": \"" $2 "\"}"}' | jq -s 'add' > ${MY_PATH}/data/slug_email_map.json
 
     # Transactions (last 100)
     curl -sX POST -H "Content-Type: application/json" -H "Personal-Token: ${OCAPIKEY}" \
         -d "{\"query\": \"query (\$slug: String) { account(slug: \$slug) { name slug transactions(limit: 100, type: CREDIT) { totalCount nodes { type fromAccount { name slug emails } amount { value currency } order { tier { slug name } } createdAt } } } }\", \"variables\": {\"slug\": \"${OCSLUG}\"}}" \
-        "${OC_API}" > data/tx.json
+        "${OC_API}" > ${MY_PATH}/data/tx.json
 
     # Time splits
     local start_of_month=$(date -d "$(date +%Y-%m-01)" +"%Y-%m-%d")
     local start_of_last_month=$(date -d "$(date +%Y-%m-01) -1 month" +"%Y-%m-%d")
     local end_of_last_month=$(date -d "$(date +%Y-%m-01) -1 day" +"%Y-%m-%d")
 
-    jq -c --arg som "$start_of_month" '.data.account.transactions.nodes[] | select(.type == "CREDIT" and .createdAt >= $som)' data/tx.json > data/current_month.credit.json
-    jq -c --arg solm "$start_of_last_month" --arg eolm "$end_of_last_month" '.data.account.transactions.nodes[] | select(.type == "CREDIT" and (.createdAt >= $solm and .createdAt <= $eolm))' data/tx.json > data/last_month.credit.json
+    jq -c --arg som "$start_of_month" '.data.account.transactions.nodes[] | select(.type == "CREDIT" and .createdAt >= $som)' ${MY_PATH}/data/tx.json > ${MY_PATH}/data/current_month.credit.json
+    jq -c --arg solm "$start_of_last_month" --arg eolm "$end_of_last_month" '.data.account.transactions.nodes[] | select(.type == "CREDIT" and (.createdAt >= $solm and .createdAt <= $eolm))' ${MY_PATH}/data/tx.json > ${MY_PATH}/data/last_month.credit.json
 }
 
 show_scan() {
     fetch_oc_data || return 1
     if [[ "$JSON_OUTPUT" == "true" ]]; then
         # Join with email map in JSON
-        jq --slurpfile map data/slug_email_map.json '
+        jq --slurpfile map ${MY_PATH}/data/slug_email_map.json '
             .data.account.transactions.nodes | map(. + {email: ($map[0][.fromAccount.slug] // .fromAccount.emails[0] // "-")})
-        ' data/tx.json
+        ' ${MY_PATH}/data/tx.json
     else
         echo ""
         echo "=== OpenCollective Scan : ${OCSLUG} ==="
         printf "%-20s | %-15s | %-25s | %-10s | %-15s | %s\n" "Name" "Slug" "Email" "Amount" "Tier" "Date"
         echo "----------------------------------------------------------------------------------------------------------------------------"
-        jq -r '.data.account.transactions.nodes[] | "\(.fromAccount.name // "-"):\(.fromAccount.slug):\(.fromAccount.emails[0] // "-"):\(.amount.value) \(.amount.currency):\(.order.tier.name // "-"):\(.createdAt)"' data/tx.json | while IFS=: read -r name slug email amount tier date; do
-            [[ "$email" == "-" ]] && email=$(jq -r --arg s "$slug" '.[$s] // "-"' data/slug_email_map.json 2>/dev/null)
+        jq -r '.data.account.transactions.nodes[] | "\(.fromAccount.name // "-"):\(.fromAccount.slug):\(.fromAccount.emails[0] // "-"):\(.amount.value) \(.amount.currency):\(.order.tier.name // "-"):\(.createdAt)"' ${MY_PATH}/data/tx.json | while IFS=: read -r name slug email amount tier date; do
+            [[ "$email" == "-" ]] && email=$(jq -r --arg s "$slug" '.[$s] // "-"' ${MY_PATH}/data/slug_email_map.json 2>/dev/null)
             printf "%-20.20s | %-15.15s | %-25.25s | %-10s | %-15.15s | %s\n" "$name" "$slug" "$email" "$amount" "$tier" "$date"
         done
     fi
@@ -141,7 +141,7 @@ show_scan() {
 show_ranking() {
     fetch_oc_data || return 1
     # Identify slugs that paid this month
-    local active_slugs=$(jq -r '.fromAccount.slug' data/current_month.credit.json | sort -u)
+    local active_slugs=$(jq -r '.fromAccount.slug' ${MY_PATH}/data/current_month.credit.json | sort -u)
     
     local rank_cmd='
         .data.account.transactions.nodes 
@@ -156,10 +156,10 @@ show_ranking() {
           }) 
         | sort_by(-.total)'
 
-    local result_json=$(jq "$rank_cmd" data/tx.json)
+    local result_json=$(jq "$rank_cmd" ${MY_PATH}/data/tx.json)
     
     # Enrich with email and active status
-    local enriched=$(echo "$result_json" | jq --argjson active "$(echo "$active_slugs" | jq -R . | jq -s .)" --slurpfile map data/slug_email_map.json '
+    local enriched=$(echo "$result_json" | jq --argjson active "$(echo "$active_slugs" | jq -R . | jq -s .)" --slurpfile map ${MY_PATH}/data/slug_email_map.json '
         map(. + {
             email: ($map[0][.slug] // "-"),
             status: (if (.slug as $s | $active | index($s)) then "ACTIVE" else "INACTIVE" end)
@@ -180,24 +180,24 @@ show_ranking() {
 
 show_alerts() {
     fetch_oc_data || return 1
-    local slugs_last=$(jq -r '.fromAccount.slug' data/last_month.credit.json | sort -u)
-    local slugs_curr=$(jq -r '.fromAccount.slug' data/current_month.credit.json | sort -u)
+    local slugs_last=$(jq -r '.fromAccount.slug' ${MY_PATH}/data/last_month.credit.json | sort -u)
+    local slugs_curr=$(jq -r '.fromAccount.slug' ${MY_PATH}/data/current_month.credit.json | sort -u)
     
     if [[ "$JSON_OUTPUT" == "true" ]]; then
         local stopped=$(comm -23 <(echo "$slugs_last") <(echo "$slugs_curr") | while read s; do
-            jq -n --arg slug "$s" --arg email "$(jq -r --arg s "$s" '.[$s] // "-"' data/slug_email_map.json)" \
-                  --arg name "$(jq -r --arg s "$s" 'select(.fromAccount.slug == $s).fromAccount.name' data/last_month.credit.json | head -1)" \
+            jq -n --arg slug "$s" --arg email "$(jq -r --arg s "$s" '.[$s] // "-"' ${MY_PATH}/data/slug_email_map.json)" \
+                  --arg name "$(jq -r --arg s "$s" 'select(.fromAccount.slug == $s).fromAccount.name' ${MY_PATH}/data/last_month.credit.json | head -1)" \
                   '{slug: $slug, name: $name, email: $email, status: "STOPPED"}'
         done | jq -s .)
         
         local common=$(comm -12 <(echo "$slugs_last") <(echo "$slugs_curr"))
         local changed="[]"
         for s in $common; do
-            local val_last=$(jq -s "map(select(.fromAccount.slug == \"$s\").amount.value) | add" data/last_month.credit.json)
-            local val_curr=$(jq -s "map(select(.fromAccount.slug == \"$s\").amount.value) | add" data/current_month.credit.json)
+            local val_last=$(jq -s "map(select(.fromAccount.slug == \"$s\").amount.value) | add" ${MY_PATH}/data/last_month.credit.json)
+            local val_curr=$(jq -s "map(select(.fromAccount.slug == \"$s\").amount.value) | add" ${MY_PATH}/data/current_month.credit.json)
             if (( $(echo "$val_last != $val_curr" | bc -l) )); then
                 changed=$(echo "$changed" | jq --arg slug "$s" --arg last "$val_last" --arg curr "$val_curr" \
-                    --arg email "$(jq -r --arg s "$s" '.[$s] // "-"' data/slug_email_map.json)" \
+                    --arg email "$(jq -r --arg s "$s" '.[$s] // "-"' ${MY_PATH}/data/slug_email_map.json)" \
                     '. += [{slug: $slug, email: $email, last_month: $last, current_month: $curr, status: "CHANGED"}]')
             fi
         done
@@ -206,19 +206,19 @@ show_alerts() {
         echo "=== Subscription Alerts (Current Month vs Last Month) ==="
         echo "--- STOPPED (Paid last month, not yet this month) ---"
         comm -23 <(echo "$slugs_last") <(echo "$slugs_curr") | while read s; do
-            local name=$(jq -r --arg s "$s" 'select(.fromAccount.slug == $s).fromAccount.name' data/last_month.credit.json | head -1)
-            local email=$(jq -r --arg s "$s" '.[$s] // "-"' data/slug_email_map.json)
+            local name=$(jq -r --arg s "$s" 'select(.fromAccount.slug == $s).fromAccount.name' ${MY_PATH}/data/last_month.credit.json | head -1)
+            local email=$(jq -r --arg s "$s" '.[$s] // "-"' ${MY_PATH}/data/slug_email_map.json)
             echo "❌ $s ($name) - Email: $email"
         done
         echo ""
         echo "--- CHANGED (Amount differs from last month) ---"
         local common=$(comm -12 <(echo "$slugs_last") <(echo "$slugs_curr"))
         for s in $common; do
-            local val_last=$(jq -s "map(select(.fromAccount.slug == \"$s\").amount.value) | add" data/last_month.credit.json)
-            local val_curr=$(jq -s "map(select(.fromAccount.slug == \"$s\").amount.value) | add" data/current_month.credit.json)
+            local val_last=$(jq -s "map(select(.fromAccount.slug == \"$s\").amount.value) | add" ${MY_PATH}/data/last_month.credit.json)
+            local val_curr=$(jq -s "map(select(.fromAccount.slug == \"$s\").amount.value) | add" ${MY_PATH}/data/current_month.credit.json)
             if (( $(echo "$val_last != $val_curr" | bc -l) )); then
-                local name=$(jq -r --arg s "$s" 'select(.fromAccount.slug == $s).fromAccount.name' data/current_month.credit.json | head -1)
-                local email=$(jq -r --arg s "$s" '.[$s] // "-"' data/slug_email_map.json)
+                local name=$(jq -r --arg s "$s" 'select(.fromAccount.slug == $s).fromAccount.name' ${MY_PATH}/data/current_month.credit.json | head -1)
+                local email=$(jq -r --arg s "$s" '.[$s] // "-"' ${MY_PATH}/data/slug_email_map.json)
                 echo "⚠️  $s ($name): ${val_last}€ -> ${val_curr}€ - Email: $email"
             fi
         done
@@ -249,7 +249,7 @@ done
 [[ -z $UPLANETNAME ]] && echo "MISSING PRIVATE SWARM ACTIVATED ASTROPORT STATION" && exit 1
 [[ "${PAF}" == "0" ]] && echo "PAF=0 — station sandbox, émission ẐEN désactivée." && exit 0
 find ./data -mtime +1 -type f -exec rm '{}' \; 2>/dev/null
-[[ ! -s data/current_month.credit.json ]] && fetch_oc_data
+[[ ! -s ${MY_PATH}/data/current_month.credit.json ]] && fetch_oc_data
 
 ########################################################################
 ## EMISSION ẐEN
@@ -363,7 +363,7 @@ while IFS= read -r credit_json; do
     created_at=$(echo "$credit_json" | jq -r '.createdAt // empty')
     tier_slug=$(echo "$credit_json" | jq -r '.order.tier.slug // empty')
 
-    [[ -z "$email" || "$email" == "null" ]] && email=$(jq -r --arg s "$slug" '.[$s] // empty' data/slug_email_map.json 2>/dev/null)
+    [[ -z "$email" || "$email" == "null" ]] && email=$(jq -r --arg s "$slug" '.[$s] // empty' ${MY_PATH}/data/slug_email_map.json 2>/dev/null)
     [[ -z "$email" || "$email" == "null" ]] && continue
 
     tx_id="${email}:${amount}:${created_at}"
@@ -408,7 +408,7 @@ while IFS= read -r credit_json; do
         dispatch_zen_emission "${email}" "${amount}" "${tier_slug}"
     fi
     [[ $? -eq 0 ]] && echo "${tx_id}:${amount}:${tier_slug}:$(date +%s):OK" >> "$EMISSION_LOG" || echo "${tx_id}:${amount}:${tier_slug}:$(date +%s):FAIL" >> "$EMISSION_LOG"
-done < <(jq -c '.' data/current_month.credit.json 2>/dev/null)
+done < <(jq -c '.' ${MY_PATH}/data/current_month.credit.json 2>/dev/null)
 
 [[ "$JSON_OUTPUT" == "false" ]] && echo "=== ẐEN emission complete ==="
 [[ -x "$MY_PATH/oc_expense_monitor.sh" ]] && "$MY_PATH/oc_expense_monitor.sh" >/dev/null 2>&1 || true
