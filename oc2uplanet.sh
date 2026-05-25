@@ -247,6 +247,7 @@ done
 ## CHECKS
 #######################################################################
 [[ -z $UPLANETNAME ]] && echo "MISSING PRIVATE SWARM ACTIVATED ASTROPORT STATION" && exit 1
+[[ "${PAF}" == "0" ]] && echo "PAF=0 — station sandbox, émission ẐEN désactivée." && exit 0
 find ./data -mtime +1 -type f -exec rm '{}' \; 2>/dev/null
 [[ ! -s data/current_month.credit.json ]] && fetch_oc_data
 
