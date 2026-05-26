@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#050a12;color:#e0f0ff;font-family:'Segoe UI',Arial,sans-serif;">
+<div style="max-width:640px;margin:0 auto;padding:32px 20px;">
+
+  <!-- HEADER -->
+  <div style="text-align:center;padding:28px 0 20px;border-bottom:1px solid rgba(0,245,255,0.2);margin-bottom:28px;">
+    <h1 style="font-family:'Courier New',monospace;color:#00f5ff;font-size:1.9rem;letter-spacing:4px;margin:0;">
+      ASTRO<span style="color:#00ff88;">PORT</span>.ONE
+    </h1>
+    <p style="color:rgba(255,255,255,0.4);font-size:0.72rem;letter-spacing:3px;margin:8px 0 0;font-family:'Courier New',monospace;">
+      🎫 M E M B R E  U P L A N E T
+    </p>
+  </div>
+
+  <!-- MERCI ADHÉRENT -->
+  <div style="background:rgba(0,255,136,0.06);border-left:3px solid #00ff88;padding:18px 20px;margin-bottom:24px;border-radius:0 4px 4px 0;">
+    <h2 style="font-family:'Courier New',monospace;color:#00ff88;font-size:1rem;letter-spacing:2px;margin:0 0 10px;">
+      ✅ ADHÉSION REÇUE — MERCI !
+    </h2>
+    <p style="margin:0;color:rgba(255,255,255,0.75);font-size:0.9rem;line-height:1.75;">
+      Votre contribution de <strong style="color:#fff;">{{AMOUNT}}&nbsp;€</strong>
+      (offre&nbsp;: <em style="color:#00f5ff;">{{TIER_SLUG}}</em>) est bien enregistrée.<br>
+      Elle correspond à <strong style="color:#00ff88;">{{AMOUNT}} Ẑ</strong> à créditer
+      sur votre MULTIPASS UPlanet — <strong>1 Ẑ = 1 like</strong> dans tout l'écosystème.
+    </p>
+  </div>
+
+  <!-- CRÉER MULTIPASS -->
+  <div style="background:rgba(0,245,255,0.04);border:1px solid rgba(0,245,255,0.25);padding:20px;margin-bottom:20px;border-radius:4px;">
+    <div style="font-family:'Courier New',monospace;font-size:0.62rem;color:#ffa500;letter-spacing:4px;margin-bottom:8px;">// ACTION REQUISE</div>
+    <h3 style="font-family:'Courier New',monospace;color:#00f5ff;font-size:1rem;letter-spacing:2px;margin:0 0 12px;">🎫 Créez votre MULTIPASS</h3>
+    <p style="color:rgba(255,255,255,0.65);font-size:0.87rem;line-height:1.7;margin:0 0 14px;">
+      Pour recevoir vos <strong style="color:#00ff88;">{{AMOUNT}} Ẑ</strong>, créez votre MULTIPASS
+      avec <strong style="color:#fff;">exactement l'adresse {{DONOR_EMAIL}}</strong>.
+      Votre profil sera accessible sur
+      <code style="color:#00f5ff;background:rgba(0,245,255,0.08);padding:1px 5px;border-radius:2px;">/ipns/{{DONOR_EMAIL}}.astroport.one/</code>
+    </p>
+    <div style="background:#000;border:1px dashed rgba(0,245,255,0.3);padding:12px;border-radius:4px;text-align:center;margin-bottom:16px;">
+      <code style="font-family:'Courier New',monospace;color:#00f5ff;font-size:0.92rem;">
+        bash &lt;(curl -sL https://install.astroport.com)
+      </code>
+    </div>
+    <p style="color:rgba(255,255,255,0.45);font-size:0.8rem;margin:0 0 14px;line-height:1.6;">
+      Puis ouvrez <code style="color:#00f5ff;">http://127.0.0.1:54321/g1</code> dans votre navigateur
+      et saisissez votre adresse email. Le système génère vos clés cryptographiques souveraines.
+    </p>
+    <div style="text-align:center;">
+      <a href="{{PROFILE_URL}}"
+         style="display:inline-block;background:#2980b9;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold;font-size:0.85rem;margin:4px;">
+        👤 Profil du Capitaine
+      </a>
+      <a href="{{STATION_URL}}/install.html"
+         style="display:inline-block;background:#27ae60;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold;font-size:0.85rem;margin:4px;">
+        📖 Guide
+      </a>
+    </div>
+  </div>
+
+  <!-- ZELKOVA -->
+  <div style="background:rgba(0,245,255,0.03);border:1px solid rgba(0,245,255,0.12);padding:18px 20px;margin-bottom:20px;border-radius:4px;">
+    <div style="font-family:'Courier New',monospace;font-size:0.62rem;color:#00ff88;letter-spacing:4px;margin-bottom:8px;">// VOTRE WALLET ẐEN</div>
+    <h3 style="font-family:'Courier New',monospace;color:#00f5ff;font-size:1rem;letter-spacing:2px;margin:0 0 10px;">
+      🌿 Zelkova — 1 Ẑ = 1 like
+    </h3>
+    <p style="color:rgba(255,255,255,0.6);font-size:0.85rem;line-height:1.7;margin:0 0 12px;">
+      Utilisez vos Ẑen pour soutenir des créateurs, voter pour des projets coopératifs,
+      ou les convertir via la blockchain Duniter (Ğ1). Chaque like sur Coracle coûte 1 Ẑ.
+    </p>
+    <a href="https://zinkgo.copylaradio.com"
+       style="color:#00f5ff;text-decoration:none;font-size:0.85rem;border-bottom:1px dotted #00f5ff;">
+      Ouvrir Zelkova → zinkgo.copylaradio.com
+    </a>
+  </div>
+
+  <!-- APPS -->
+  <div style="border:1px solid rgba(0,245,255,0.1);padding:18px 20px;margin-bottom:20px;border-radius:4px;">
+    <div style="font-family:'Courier New',monospace;font-size:0.62rem;color:#00ff88;letter-spacing:4px;margin-bottom:8px;">// APPLICATIONS 🚧</div>
+    <table style="width:100%;border-collapse:collapse;">
+      <tr>
+        <td style="padding:6px 8px 6px 0;vertical-align:top;width:50%;">
+          <strong style="color:#00ff88;font-size:0.83rem;">💬 Coracle</strong><br>
+          <span style="color:rgba(255,255,255,0.5);font-size:0.78rem;">Réseau social NOSTR + ẐEN.
+          <a href="https://coracle.copylaradio.com" style="color:#00f5ff;">Ouvrir →</a></span>
+        </td>
+        <td style="padding:6px 0 6px 8px;vertical-align:top;width:50%;">
+          <strong style="color:#00ff88;font-size:0.83rem;">📺 NOSTR Tube</strong><br>
+          <span style="color:rgba(255,255,255,0.5);font-size:0.78rem;">Vidéo IPFS/NOSTR.
+          <a href="https://u.copylaradio.com/youtube?html=1" style="color:#00f5ff;">Voir →</a></span>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:6px 8px 6px 0;vertical-align:top;">
+          <strong style="color:#00ff88;font-size:0.83rem;">🎙️ VOCALS</strong><br>
+          <span style="color:rgba(255,255,255,0.5);font-size:0.78rem;">Audio coopératif.
+          <a href="https://u.copylaradio.com/vocals-read" style="color:#00f5ff;">Écouter →</a></span>
+        </td>
+        <td style="padding:6px 0 6px 8px;vertical-align:top;">
+          <strong style="color:#00ff88;font-size:0.83rem;">🎥 VDO.NINJA</strong><br>
+          <span style="color:rgba(255,255,255,0.5);font-size:0.78rem;">Enregistrement P2P.
+          <a href="https://vdo.copylaradio.com/?room=UPLANET&effects&record" style="color:#00f5ff;">Salle UPLANET →</a></span>
+        </td>
+      </tr>
+    </table>
+    <p style="margin:14px 0 0;color:rgba(255,255,255,0.35);font-size:0.78rem;line-height:1.6;">
+      Invitez vos amis — l'idéal c'est une vingtaine dans la même région pour activer les fonctions de groupe (WoTx2).
+      <a href="https://opencollective.com/monnaie-libre" style="color:#00f5ff;">Rejoindre OpenCollective →</a>
+    </p>
+  </div>
+
+  {{STATION_CARD}}
+
+  <!-- BIEN COMMUN + FEEDBACK -->
+  <div style="background:rgba(0,255,136,0.04);border:1px solid rgba(0,255,136,0.09);padding:14px 18px;margin-bottom:18px;border-radius:4px;text-align:center;">
+    <p style="font-size:0.8rem;color:rgba(255,255,255,0.5);margin:0 0 10px;line-height:1.65;">
+      🌍 UPlanet est un <strong style="color:rgba(255,255,255,0.8);">bien commun numérique</strong>
+      géré par et pour la communauté.<br>
+      Vos retours d'expérience améliorent le service pour tous les membres.
+    </p>
+    <a href="https://ipfs.copylaradio.com/ipns/copylaradio.com/feedback.html"
+       style="display:inline-block;background:rgba(0,255,136,0.12);color:#00ff88;
+              padding:7px 18px;border-radius:5px;text-decoration:none;font-size:0.82rem;
+              border:1px solid rgba(0,255,136,0.25);">
+      🐛 Un bug ? Une amélioration ?
+    </a>
+  </div>
+
+  <!-- FOOTER -->
+  <div style="text-align:center;padding-top:20px;border-top:1px solid rgba(255,255,255,0.06);">
+    <p style="font-size:0.75rem;color:rgba(255,255,255,0.3);margin:0 0 4px;">
+      <a href="mailto:{{CAPTAIN_EMAIL}}" style="color:rgba(0,245,255,0.5);">{{CAPTAIN_EMAIL}}</a>
+      · <a href="https://coracle.copylaradio.com" style="color:rgba(0,245,255,0.5);">Coracle</a>
+    </p>
+    <p style="font-family:'Courier New',monospace;font-size:0.62rem;color:rgba(255,255,255,0.18);margin:0 0 4px;">
+      ASTROPORT.ONE · AGPL-3.0 · station <code>{{UPLANETNAME}}</code>
+    </p>
+    <p style="margin:0;font-size:0.68rem;">
+      <a href="{{UNSUB_URL}}" style="color:rgba(255,255,255,0.22);text-decoration:none;border-bottom:1px dotted rgba(255,255,255,0.18);">Gérer mes préférences de notification</a>
+    </p>
+  </div>
+
+</div>
+</body>
+</html>

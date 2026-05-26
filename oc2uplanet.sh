@@ -280,58 +280,232 @@ dispatch_zen_emission() {
     esac
 }
 
-_send_multipass_invitation() {
-    local email="$1" amount="$2" tier_slug="$3"
+_build_station_card_html() {
+    ## Génère un bloc HTML présentant les capacités de cette station Astroport.
+    ## Injecté dans les emails d'invitation via {{STATION_CARD}}.
+    local _hb_json
+    if [[ -n "$IPFSNODEID" ]]; then
+        _hb_json="${HOME}/.zen/tmp/${IPFSNODEID}/heartbox_analysis.json"
+    else
+        _hb_json=$(find "${HOME}/.zen/tmp" -maxdepth 2 -name "heartbox_analysis.json" 2>/dev/null | head -1)
+    fi
+    [[ ! -s "$_hb_json" ]] && return 0
 
-    ## Idempotence mensuelle : une seule invitation par email par mois
-    local month_key="${email}:$(date +%Y-%m)"
-    grep -qF "$month_key" "$INVITATION_LOG" 2>/dev/null && return 0
+    local hostname cpu_model cpu_cores ram_gb
+    local power_score provider_tier gpu_detected gpu_vram gpu_name
+    local disk_write disk_read crypto_score crypto_ms
+    local zencard_slots nostr_slots
+    local ollama_active ollama_models nextcloud_active
+    local ipfs_active ipfs_peers nostr_relay_active nostr_engine
+
+    hostname=$(jq -r '.node_info.hostname // "Station UPlanet"' "$_hb_json" 2>/dev/null | sed 's/&/\&amp;/g; s/</\&lt;/g')
+    cpu_model=$(jq -r '.system.cpu.model // "Unknown"' "$_hb_json" 2>/dev/null | sed 's/&/\&amp;/g; s/</\&lt;/g')
+    cpu_cores=$(jq -r '.system.cpu.cores // 0' "$_hb_json" 2>/dev/null)
+    ram_gb=$(jq -r '.system.memory.total_gb // 0' "$_hb_json" 2>/dev/null)
+    power_score=$(jq -r '.capacities.power_score // 0' "$_hb_json" 2>/dev/null)
+    provider_tier=$(jq -r '.capacities.provider_tier // "light"' "$_hb_json" 2>/dev/null)
+    gpu_detected=$(jq -r '.capacities.gpu.detected // false' "$_hb_json" 2>/dev/null)
+    gpu_vram=$(jq -r '.capacities.gpu.vram_gb // 0' "$_hb_json" 2>/dev/null)
+    gpu_name=$(jq -r '.capacities.gpu.name // ""' "$_hb_json" 2>/dev/null | sed 's/&/\&amp;/g; s/</\&lt;/g')
+    disk_write=$(jq -r '.capacities.disk_io.write_mbps // 0' "$_hb_json" 2>/dev/null)
+    disk_read=$(jq -r '.capacities.disk_io.read_mbps // 0' "$_hb_json" 2>/dev/null)
+    crypto_score=$(jq -r '.capacities.crypto_score // 0' "$_hb_json" 2>/dev/null)
+    crypto_ms=$(jq -r '.capacities.crypto_ms // 0' "$_hb_json" 2>/dev/null)
+    zencard_slots=$(jq -r '.capacities.zencard_slots // 0' "$_hb_json" 2>/dev/null)
+    nostr_slots=$(jq -r '.capacities.nostr_slots // 0' "$_hb_json" 2>/dev/null)
+    ollama_active=$(jq -r '.services.ai_company.ollama.active // false' "$_hb_json" 2>/dev/null)
+    ollama_models=$(jq -r '(.services.ai_company.ollama.models // []) | map(split(":")[0]) | join(", ")' "$_hb_json" 2>/dev/null)
+    nextcloud_active=$(jq -r '.services.nextcloud.cloud_apache.active // false' "$_hb_json" 2>/dev/null)
+    ipfs_active=$(jq -r '.services.ipfs.active // false' "$_hb_json" 2>/dev/null)
+    ipfs_peers=$(jq -r '.services.ipfs.peers_connected // 0' "$_hb_json" 2>/dev/null)
+    nostr_relay_active=$(jq -r '.services.nostr_relay.active // false' "$_hb_json" 2>/dev/null)
+    nostr_engine=$(jq -r '.services.nostr_relay.engine // "strfry"' "$_hb_json" 2>/dev/null)
+
+    local tier_badge tier_color
+    case "$provider_tier" in
+        brain-gpu)  tier_badge="🔥 BRAIN-GPU"  ; tier_color="#ff6b35" ;;
+        brain-cpu)  tier_badge="🔥 BRAIN-CPU"  ; tier_color="#ff9500" ;;
+        standard)   tier_badge="⚡ STANDARD"   ; tier_color="#e8d44d" ;;
+        *)          tier_badge="🌿 LIGHT"       ; tier_color="#00ff88" ;;
+    esac
+
+    local svc_badges=""
+    [[ "$ipfs_active" == "true" ]] && \
+        svc_badges+="<span style=\"display:inline-block;background:rgba(0,245,255,0.1);border:1px solid rgba(0,245,255,0.2);border-radius:3px;padding:2px 8px;font-size:0.72rem;color:#00f5ff;margin:2px 2px 2px 0;\">🌐&nbsp;IPFS&nbsp;(${ipfs_peers})</span>"
+    [[ "$nostr_relay_active" == "true" ]] && \
+        svc_badges+="<span style=\"display:inline-block;background:rgba(0,245,255,0.08);border:1px solid rgba(0,245,255,0.18);border-radius:3px;padding:2px 8px;font-size:0.72rem;color:#00f5ff;margin:2px 2px 2px 0;\">⚡&nbsp;NOSTR&nbsp;(${nostr_engine})</span>"
+    [[ "$nextcloud_active" == "true" ]] && \
+        svc_badges+="<span style=\"display:inline-block;background:rgba(0,255,136,0.08);border:1px solid rgba(0,255,136,0.2);border-radius:3px;padding:2px 8px;font-size:0.72rem;color:#00ff88;margin:2px 2px 2px 0;\">☁️&nbsp;NextCloud</span>"
+    [[ "$ollama_active" == "true" ]] && \
+        svc_badges+="<span style=\"display:inline-block;background:rgba(195,155,211,0.1);border:1px solid rgba(195,155,211,0.2);border-radius:3px;padding:2px 8px;font-size:0.72rem;color:#c39bd3;margin:2px 2px 2px 0;\">🤖&nbsp;Ollama&nbsp;LLM</span>"
+
+    local gpu_row=""
+    [[ "$gpu_detected" == "true" && "${gpu_vram:-0}" -gt 0 ]] && \
+        gpu_row="<tr><td style=\"padding:3px 8px;color:rgba(255,255,255,0.45);\">GPU</td><td style=\"padding:3px 8px;color:#c39bd3;\">${gpu_name}&nbsp;·&nbsp;${gpu_vram}&nbsp;Go VRAM</td></tr>"
+
+    local models_row=""
+    [[ "$ollama_active" == "true" && -n "$ollama_models" && "$ollama_models" != "null" && "$ollama_models" != "" ]] && \
+        models_row="<tr><td style=\"padding:3px 8px;color:rgba(255,255,255,0.45);\">Modèles&nbsp;IA</td><td style=\"padding:3px 8px;color:#c39bd3;font-size:0.78rem;\">${ollama_models}</td></tr>"
+
+    local crypto_info="${crypto_score}/10"
+    [[ "${crypto_ms:-0}" -gt 0 ]] && crypto_info="${crypto_score}/10&nbsp;(${crypto_ms}&nbsp;ms)"
+
+    cat << STATION_HTML
+
+  <!-- FICHE STATION ASTROPORT -->
+  <div style="background:rgba(0,0,0,0.3);border:1px solid rgba(0,245,255,0.15);padding:18px 20px;margin-bottom:20px;border-radius:4px;">
+    <div style="font-family:'Courier New',monospace;font-size:0.62rem;color:#00f5ff;letter-spacing:4px;margin-bottom:12px;">// STATION ASTROPORT · SOURCE DE CE MESSAGE</div>
+    <table style="width:100%;margin-bottom:14px;"><tr>
+      <td style="vertical-align:top;">
+        <strong style="font-family:'Courier New',monospace;color:#00f5ff;font-size:0.95rem;">${hostname}</strong><br>
+        <span style="font-family:'Courier New',monospace;font-size:0.68rem;color:rgba(255,255,255,0.3);">${UPLANETNAME:0:8}</span>
+      </td>
+      <td style="text-align:right;vertical-align:top;">
+        <span style="display:inline-block;background:rgba(0,245,255,0.06);border:1px solid rgba(0,245,255,0.22);border-radius:3px;padding:4px 12px;font-family:'Courier New',monospace;font-size:0.75rem;color:${tier_color};">${tier_badge}&nbsp;·&nbsp;Score&nbsp;${power_score}</span>
+      </td>
+    </tr></table>
+    <table style="width:100%;border-collapse:collapse;font-size:0.82rem;margin-bottom:14px;">
+      <tr>
+        <td style="padding:3px 8px;color:rgba(255,255,255,0.45);width:30%;">CPU</td>
+        <td style="padding:3px 8px;color:#e0f0ff;">${cpu_model}&nbsp;·&nbsp;${cpu_cores}&nbsp;cœurs</td>
+      </tr>
+      <tr>
+        <td style="padding:3px 8px;color:rgba(255,255,255,0.45);">RAM</td>
+        <td style="padding:3px 8px;color:#e0f0ff;">${ram_gb}&nbsp;Go</td>
+      </tr>
+      ${gpu_row}
+      <tr>
+        <td style="padding:3px 8px;color:rgba(255,255,255,0.45);">Disque</td>
+        <td style="padding:3px 8px;color:#e0f0ff;">✍&nbsp;${disk_write}&nbsp;MB/s&nbsp;·&nbsp;📖&nbsp;${disk_read}&nbsp;MB/s</td>
+      </tr>
+      <tr>
+        <td style="padding:3px 8px;color:rgba(255,255,255,0.45);">Crypto</td>
+        <td style="padding:3px 8px;color:#e0f0ff;">${crypto_info}</td>
+      </tr>
+      <tr>
+        <td style="padding:3px 8px;color:rgba(255,255,255,0.45);">Capacités</td>
+        <td style="padding:3px 8px;color:#00ff88;">${zencard_slots}&nbsp;ZenCard&nbsp;·&nbsp;${nostr_slots}&nbsp;slots&nbsp;NOSTR</td>
+      </tr>
+      ${models_row}
+    </table>
+    <div style="margin-bottom:12px;">${svc_badges}</div>
+    <p style="margin:0;font-size:0.72rem;color:rgba(255,255,255,0.3);">Capitaine&nbsp;:&nbsp;<a href="mailto:${CAPTAIN_TARGET:-support@qo-op.com}" style="color:rgba(0,245,255,0.5);">${CAPTAIN_TARGET:-support@qo-op.com}</a>&nbsp;·&nbsp;<a href="${station_url:-https://u.copylaradio.com}" style="color:rgba(0,245,255,0.4);">Station →</a>&nbsp;·&nbsp;<a href="https://ipfs.copylaradio.com/ipns/${IPFSNODEID}/status.html" style="color:rgba(0,245,255,0.4);">📊&nbsp;Status →</a></p>
+  </div>
+
+STATION_HTML
+}
+
+_send_multipass_invitation() {
+    local email="$1" amount="$2" tier_slug="$3" donor_email="${4:-$1}"
+
+    ## Opt-out Mailjet : vérifier ~/.zen/game/nostr/$email/.mailjet
+    local mailjet_optout="${HOME}/.zen/game/nostr/${email}/.mailjet"
+    if [[ -f "$mailjet_optout" ]]; then
+        local _ch
+        _ch=$(jq -r '.channels[]?' "$mailjet_optout" 2>/dev/null)
+        if echo "$_ch" | grep -qE '^(email|all)$'; then
+            [[ "$JSON_OUTPUT" == "false" ]] && echo "⛔ ${email} a demandé l'opt-out (mailjet)"
+            return 0
+        fi
+    fi
+
+    ## Ne pas envoyer depuis une station publiquement routable (uSPOT + myIPFS)
+    ## Une telle station est déjà visible — la compétition par email est pour les nœuds locaux
+    _oc_pub() { [[ -n "$1" ]] && ! echo "$1" | grep -qE '(localhost|127\.|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)'; }
+    if _oc_pub "${uSPOT}" && _oc_pub "${myIPFS}"; then
+        [[ "$JSON_OUTPUT" == "false" ]] && echo "ℹ️  Station publique (uSPOT+myIPFS routables) — invitation concurrentielle inactive"
+        return 0
+    fi
+
+    ## Idempotence : renvoi toutes les 72h si MULTIPASS non détecté
+    local now
+    now=$(date +%s)
+    local last_ts
+    last_ts=$(grep -F "${email}:" "$INVITATION_LOG" | grep ":INVITED:" | grep -oE ':[0-9]{10}$' | tail -1 | tr -d ':')
+    if [[ -n "$last_ts" ]] && (( now - last_ts < 86400 )); then
+        return 0
+    fi
 
     local captain_npub=""
     [[ -n "$CAPTAIN_TARGET" ]] && captain_npub=$(cat ~/.zen/game/nostr/${CAPTAIN_TARGET}/NPUB 2>/dev/null)
 
-    local station_url="${uSPOT:-https://${myDOMAIN}}"
-    local profile_url="${station_url}/nostr_profile_viewer.html"
-    [[ -n "$captain_npub" ]] && profile_url="${profile_url}?npub=${captain_npub}"
+    ## URL publique de la station — domaine DNS > Yggdrasil > fallback coopératif
+    local station_url
+    if [[ -n "$myDOMAIN" ]]; then
+        station_url="https://${myDOMAIN}"
+    elif [[ -n "$uSPOT" ]]; then
+        station_url="$uSPOT"
+    else
+        station_url="https://u.copylaradio.com"
+    fi
+
+    ## Profil NOSTR du capitaine (viewer public sur la station ou Coracle)
+    local profile_url
+    if [[ -n "$captain_npub" ]]; then
+        profile_url="${station_url}/nostr_profile_viewer.html?npub=${captain_npub}"
+    else
+        profile_url="https://coracle.copylaradio.com"
+    fi
+
+    ## Sélection du template et objet selon le tier
+    local template_file subject
+    case "$tier_slug" in
+        *parrainage*128*|*extension-128*|*satellite*|*love-box*claude*)
+            template_file="${MY_PATH}/templates/invitation_satellite.html"
+            subject="🌟 Bienvenue Parrain Satellite UPlanet — créez votre MULTIPASS" ;;
+        *parrainage*gpu*|*module-gpu*|*constellation*|*love-box*deluxe*|*love-box*gpu*)
+            template_file="${MY_PATH}/templates/invitation_constellation.html"
+            subject="✨ Bienvenue Parrain Constellation UPlanet — accès GPU & #BRO" ;;
+        *infrastructure*|*labo*|*genereux-donateur*|*r-d*|*recherche*)
+            template_file="${MY_PATH}/templates/notification_labo.html"
+            subject="🔬 Contribution Labo/R&D reçue — UPlanet" ;;
+        *membre-resident*|*cloud-usage*|*adhesion*)
+            template_file="${MY_PATH}/templates/invitation_locataire.html"
+            subject="🎫 Votre adhésion UPlanet — créez votre MULTIPASS" ;;
+        *)
+            template_file="${MY_PATH}/templates/invitation_multipass.html"
+            subject="Votre contribution UPlanet — créez votre MULTIPASS" ;;
+    esac
+    [[ ! -f "$template_file" ]] && template_file="${MY_PATH}/templates/invitation_multipass.html"
 
     local tmp_html
     tmp_html=$(mktemp /tmp/oc_invitation_XXXXXX.html)
-    cat > "$tmp_html" << HTMLEOF
+
+    if [[ -f "$template_file" ]]; then
+        sed \
+            -e "s|{{EMAIL}}|${email}|g" \
+            -e "s|{{DONOR_EMAIL}}|${donor_email}|g" \
+            -e "s|{{AMOUNT}}|${amount}|g" \
+            -e "s|{{TIER_SLUG}}|${tier_slug:-standard}|g" \
+            -e "s|{{STATION_URL}}|${station_url}|g" \
+            -e "s|{{PROFILE_URL}}|${profile_url}|g" \
+            -e "s|{{CAPTAIN_EMAIL}}|${CAPTAIN_TARGET:-support@qo-op.com}|g" \
+            -e "s|{{UPLANETNAME}}|${UPLANETNAME:0:8}|g" \
+            "$template_file" > "$tmp_html"
+    else
+        cat > "$tmp_html" << HTMLEOF
 <div style="font-family:sans-serif;max-width:600px;margin:0 auto;color:#222">
   <h2>🌍 Votre contribution sur UPlanet</h2>
-  <p>Bonjour,</p>
-  <p>Nous avons bien reçu votre contribution de <strong>${amount}&nbsp;€</strong>
-     (offre&nbsp;: <em>${tier_slug:-standard}</em>) sur OpenCollective — merci !</p>
-  <p>Pour convertir votre don en <strong>Ẑen</strong> et accéder à votre portefeuille
-     coopératif, vous devez posséder un <strong>MULTIPASS UPlanet</strong> associé
-     à l'adresse email que vous avez utilisée sur OpenCollective.</p>
-  <hr style="border:none;border-top:1px solid #ddd;margin:20px 0">
-  <h3>🎫 Créer votre MULTIPASS</h3>
-  <p>Votre Capitaine administre la station qui hébergera votre identité souveraine
-     sur le réseau NOSTR d'UPlanet. Consultez son profil et choisissez votre Astroport&nbsp;:</p>
-  <p style="text-align:center;margin:24px 0">
-    <a href="${profile_url}"
-       style="background:#2980b9;color:white;padding:12px 24px;border-radius:8px;
-              text-decoration:none;font-weight:bold;display:inline-block">
-      👤 Voir le MULTIPASS du Capitaine
-    </a>
-  </p>
-  <p style="text-align:center;margin:16px 0">
-    <a href="${station_url}"
-       style="background:#27ae60;color:white;padding:12px 24px;border-radius:8px;
-              text-decoration:none;font-weight:bold;display:inline-block">
-      🚀 Accéder à la station UPlanet
-    </a>
-  </p>
-  <hr style="border:none;border-top:1px solid #ddd;margin:20px 0">
-  <p style="font-size:0.88em;color:#555">
-    ⚠️ <strong>Important&nbsp;:</strong> lors de la création de votre MULTIPASS,
-    utilisez exactement l'adresse email <code>${email}</code> — la même que sur
-    OpenCollective — pour que votre contribution de <strong>${amount}&nbsp;Ẑ</strong>
-    soit créditée automatiquement.
-  </p>
+  <p>Contribution de <strong>${amount}&nbsp;€</strong> (${tier_slug:-standard}) reçue — merci !</p>
+  <p>Créez votre MULTIPASS avec l'email <code>${donor_email}</code> sur
+     <a href="${station_url}">${station_url}</a> ou via
+     <code>bash &lt;(curl -sL https://install.astroport.com)</code>.</p>
 </div>
 HTMLEOF
+    fi
+
+    ## Injecter la fiche station (substitution multi-ligne via Python)
+    local _card_tmpfile
+    _card_tmpfile=$(mktemp /tmp/station_card_XXXXXX.html)
+    _build_station_card_html > "$_card_tmpfile"
+    python3 - "$_card_tmpfile" "$tmp_html" << 'PYEOF' 2>/dev/null || \
+        sed -i 's/{{STATION_CARD}}//' "$tmp_html"
+import sys
+with open(sys.argv[1], encoding='utf-8') as f: card = f.read()
+with open(sys.argv[2], encoding='utf-8') as f: html = f.read()
+with open(sys.argv[2], 'w', encoding='utf-8') as f: f.write(html.replace('{{STATION_CARD}}', card))
+PYEOF
+    rm -f "$_card_tmpfile"
 
     if [[ -x "${ASTROPORT}/tools/mailjet.sh" ]]; then
         "${ASTROPORT}/tools/mailjet.sh" \
@@ -339,11 +513,11 @@ HTMLEOF
             --expire 7d \
             "${email}" \
             "${tmp_html}" \
-            "Votre contribution UPlanet — créez votre MULTIPASS"
+            "${subject}"
         local rc=$?
         rm -f "$tmp_html"
         if [[ $rc -eq 0 ]]; then
-            echo "${month_key}:${amount}:INVITED:$(date +%s)" >> "$INVITATION_LOG"
+            echo "${email}:${amount}:INVITED:$(date +%s)" >> "$INVITATION_LOG"
             [[ "$JSON_OUTPUT" == "false" ]] && echo "📧 Invitation envoyée à ${email} (${amount} €)"
         else
             [[ "$JSON_OUTPUT" == "false" ]] && echo "⚠️  Échec envoi invitation à ${email} (mailjet rc=$rc)"
@@ -381,7 +555,7 @@ while IFS= read -r credit_json; do
         _swarm_hit=$(find ~/.zen/tmp/swarm -name "G1PUBNOSTR" 2>/dev/null | grep -F "/${_effective_email}/" | head -1)
         if [[ -z "$_swarm_hit" ]]; then
             [[ "$JSON_OUTPUT" == "false" ]] && echo "⚠️  MULTIPASS introuvable pour ${_effective_email} — invitation en cours"
-            _send_multipass_invitation "${_effective_email}" "${amount}" "${tier_slug}"
+            _send_multipass_invitation "${_effective_email}" "${amount}" "${tier_slug}" "${email}"
         else
             [[ "$JSON_OUTPUT" == "false" ]] && echo "ℹ️  MULTIPASS de ${_effective_email} présent dans le swarm (${_swarm_hit})"
         fi

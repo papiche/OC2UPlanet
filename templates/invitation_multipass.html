@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin:0;padding:0;background:#050a12;color:#e0f0ff;font-family:'Segoe UI',Arial,sans-serif;">
+<div style="max-width:640px;margin:0 auto;padding:32px 20px;">
+
+  <!-- HEADER -->
+  <div style="text-align:center;padding:28px 0 20px;border-bottom:1px solid rgba(0,245,255,0.2);margin-bottom:28px;">
+    <h1 style="font-family:'Courier New',monospace;color:#00f5ff;font-size:1.9rem;letter-spacing:4px;margin:0;">
+      ASTRO<span style="color:#00ff88;">PORT</span>.ONE
+    </h1>
+    <p style="color:rgba(255,255,255,0.4);font-size:0.72rem;letter-spacing:3px;margin:8px 0 0;font-family:'Courier New',monospace;">
+      U P L A N E T  ·  R É S E A U  C O O P É R A T I F
+    </p>
+  </div>
+
+  <!-- MERCI -->
+  <div style="background:rgba(0,255,136,0.06);border-left:3px solid #00ff88;padding:18px 20px;margin-bottom:24px;border-radius:0 4px 4px 0;">
+    <h2 style="font-family:'Courier New',monospace;color:#00ff88;font-size:1rem;letter-spacing:2px;margin:0 0 10px;">
+      ✅ CONTRIBUTION REÇUE — MERCI !
+    </h2>
+    <p style="margin:0;color:rgba(255,255,255,0.75);font-size:0.9rem;line-height:1.7;">
+      Votre contribution de <strong style="color:#fff;">{{AMOUNT}}&nbsp;€</strong>
+      (offre&nbsp;: <em style="color:#00f5ff;">{{TIER_SLUG}}</em>) sur
+      <a href="https://opencollective.com/monnaie-libre" style="color:#00ff88;">OpenCollective</a>
+      a bien été enregistrée dans la blockchain Duniter.<br>
+      Tous les € reçus sont tracés et convertibles en <strong style="color:#00ff88;">Ẑen</strong>.
+    </p>
+  </div>
+
+  <!-- ACTION REQUISE : MULTIPASS -->
+  <div style="background:rgba(0,245,255,0.04);border:1px solid rgba(0,245,255,0.2);padding:22px;margin-bottom:24px;border-radius:4px;">
+    <div style="font-family:'Courier New',monospace;font-size:0.62rem;color:#00ff88;letter-spacing:4px;margin-bottom:8px;">
+      // ACTION REQUISE
+    </div>
+    <h2 style="font-family:'Courier New',monospace;color:#00f5ff;font-size:1.3rem;letter-spacing:2px;margin:0 0 12px;">
+      🎫 CRÉEZ VOTRE MULTIPASS
+    </h2>
+    <p style="color:rgba(255,255,255,0.7);font-size:0.9rem;line-height:1.75;margin:0 0 16px;">
+      Pour convertir votre don en <strong style="color:#00ff88;">Ẑen</strong> et accéder à votre
+      portefeuille coopératif, vous devez créer un <strong>MULTIPASS UPlanet</strong>.
+    </p>
+
+    <div style="background:#000;border:1px dashed rgba(0,245,255,0.35);padding:14px;border-radius:4px;text-align:center;margin-bottom:16px;">
+      <code style="font-family:'Courier New',monospace;color:#00f5ff;font-size:0.95rem;">
+        bash &lt;(curl -sL https://install.astroport.com)
+      </code>
+    </div>
+
+    <p style="color:rgba(255,255,255,0.55);font-size:0.82rem;line-height:1.7;margin:0 0 18px;">
+      Lancez cette commande sur votre machine Linux, puis ouvrez
+      <code style="color:#00f5ff;background:rgba(0,245,255,0.08);padding:1px 5px;border-radius:2px;">http://127.0.0.1:54321/g1</code>
+      dans votre navigateur. Saisissez l'adresse
+      <strong style="color:#fff;">{{EMAIL}}</strong> — exactement la même que sur OpenCollective —
+      pour que votre contribution soit créditée automatiquement.
+    </p>
+
+    <div style="text-align:center;margin:20px 0 8px;">
+      <a href="{{PROFILE_URL}}"
+         style="display:inline-block;background:#2980b9;color:#fff;padding:11px 22px;
+                border-radius:6px;text-decoration:none;font-weight:bold;font-size:0.88rem;margin:0 6px 8px;">
+        👤 Profil du Capitaine
+      </a>
+      <a href="{{STATION_URL}}/install.html"
+         style="display:inline-block;background:#27ae60;color:#fff;padding:11px 22px;
+                border-radius:6px;text-decoration:none;font-weight:bold;font-size:0.88rem;margin:0 6px 8px;">
+        🚀 Guide d'installation
+      </a>
+    </div>
+  </div>
+
+  <!-- ZELKOVA -->
+  <div style="background:rgba(0,245,255,0.04);border:1px solid rgba(0,245,255,0.15);padding:20px;margin-bottom:18px;border-radius:4px;">
+    <div style="font-family:'Courier New',monospace;font-size:0.62rem;color:#00ff88;letter-spacing:4px;margin-bottom:6px;">
+      // PORTEFEUILLE ẐEN
+    </div>
+    <h3 style="font-family:'Courier New',monospace;color:#00f5ff;font-size:1.1rem;letter-spacing:2px;margin:0 0 10px;">
+      🌿 ZELKOVA — Votre wallet coopératif
+    </h3>
+    <p style="color:rgba(255,255,255,0.65);font-size:0.87rem;line-height:1.7;margin:0 0 12px;">
+      <strong style="color:#fff;">1 Ẑ = 1 € = 1 like</strong> — utilisez vos Ẑen pour soutenir
+      les créations de la communauté, flécher des investissements coopératifs, ou les convertir
+      via la blockchain Duniter (Ğ1).
+    </p>
+    <a href="https://zinkgo.copylaradio.com"
+       style="color:#00f5ff;text-decoration:none;font-size:0.85rem;border-bottom:1px dotted #00f5ff;">
+      Ouvrir Zelkova →
+    </a>
+  </div>
+
+  <!-- APPS EN COURS -->
+  <div style="border:1px solid rgba(0,245,255,0.1);padding:20px;margin-bottom:18px;border-radius:4px;">
+    <div style="font-family:'Courier New',monospace;font-size:0.62rem;color:#00ff88;letter-spacing:4px;margin-bottom:8px;">
+      // APPLICATIONS EN COURS 🚧
+    </div>
+    <h3 style="font-family:'Courier New',monospace;color:#00f5ff;font-size:1rem;letter-spacing:2px;margin:0 0 14px;">
+      Découvrez ce qui se construit
+    </h3>
+
+    <table style="width:100%;border-collapse:collapse;">
+      <tr>
+        <td style="padding:8px 10px 8px 0;vertical-align:top;width:50%;">
+          <strong style="color:#00ff88;font-size:0.85rem;">📺 NOSTR Tube</strong><br>
+          <span style="color:rgba(255,255,255,0.55);font-size:0.8rem;line-height:1.6;">
+            Hébergement vidéo décentralisé sur IPFS/NOSTR.
+            <a href="https://u.copylaradio.com/youtube?html=1" style="color:#00f5ff;">Voir →</a>
+          </span>
+        </td>
+        <td style="padding:8px 0 8px 10px;vertical-align:top;width:50%;">
+          <strong style="color:#00ff88;font-size:0.85rem;">🎙️ VOCALS</strong><br>
+          <span style="color:rgba(255,255,255,0.55);font-size:0.8rem;line-height:1.6;">
+            Streaming audio coopératif (Snapcast + NOSTR).
+            <a href="https://u.copylaradio.com/vocals-read" style="color:#00f5ff;">Écouter →</a>
+          </span>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:8px 10px 8px 0;vertical-align:top;">
+          <strong style="color:#00ff88;font-size:0.85rem;">🎥 VDO.NINJA</strong><br>
+          <span style="color:rgba(255,255,255,0.55);font-size:0.8rem;line-height:1.6;">
+            Enregistrement multi-participants P2P.<br>
+            <a href="https://vdo.copylaradio.com/?room=UPLANET&effects&record" style="color:#00f5ff;">Rejoindre la salle UPLANET →</a>
+          </span>
+        </td>
+        <td style="padding:8px 0 8px 10px;vertical-align:top;">
+          <strong style="color:#00ff88;font-size:0.85rem;">💬 Coracle</strong><br>
+          <span style="color:rgba(255,255,255,0.55);font-size:0.8rem;line-height:1.6;">
+            Client NOSTR coopératif (messages, vidéos, likes ẐEN).
+            <a href="https://coracle.copylaradio.com" style="color:#00f5ff;">Ouvrir →</a>
+          </span>
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- CONTRIBUER + S'IMPLIQUER -->
+  <div style="background:rgba(0,255,136,0.04);border:1px solid rgba(0,255,136,0.15);padding:20px;margin-bottom:18px;border-radius:4px;">
+    <div style="font-family:'Courier New',monospace;font-size:0.62rem;color:#00ff88;letter-spacing:4px;margin-bottom:8px;">
+      // ALLER PLUS LOIN
+    </div>
+    <h3 style="font-family:'Courier New',monospace;color:#00ff88;font-size:1rem;letter-spacing:2px;margin:0 0 12px;">
+      Rejoindre la constellation
+    </h3>
+    <p style="color:rgba(255,255,255,0.65);font-size:0.85rem;line-height:1.7;margin:0 0 14px;">
+      L'idéal c'est de se retrouver à <strong style="color:#fff;">5 minimum</strong> (et mieux,
+      une vingtaine dans la même région) pour activer les fonctions de groupe de la
+      <strong>WoTx2</strong> — la toile de confiance des compétences.<br>
+      Parlez-en autour de vous, dans votre WoT !
+    </p>
+
+    <p style="color:rgba(255,255,255,0.55);font-size:0.82rem;line-height:1.7;margin:0 0 10px;">
+      <strong style="color:#fff;">Parrainer une station :</strong>
+    </p>
+    <ul style="margin:0 0 14px;padding-left:18px;color:rgba(255,255,255,0.6);font-size:0.82rem;line-height:2;">
+      <li><a href="https://opencollective.com/monnaie-libre/contribute/parrainage-infrastructure-extension-128-go-98386" style="color:#00f5ff;">uDRIVE 128 Go + NextCloud</a></li>
+      <li><a href="https://opencollective.com/monnaie-libre/contribute/parrainage-infrastructure-module-gpu-1-24-98385" style="color:#00f5ff;">uDRIVE 128 Go + IA (accès #BRO)</a></li>
+      <li><a href="https://opencollective.com/monnaie-libre/projects/coeurbox/contribute/love-box-le-claude-53061" style="color:#00f5ff;">Station Satellite complète</a></li>
+      <li><a href="https://opencollective.com/monnaie-libre/projects/coeurbox/contribute/love-box-deluxe-gpu-49182" style="color:#00f5ff;">Station GPU complète</a></li>
+    </ul>
+
+    <p style="color:rgba(255,255,255,0.55);font-size:0.82rem;line-height:1.7;margin:0 0 10px;">
+      <strong style="color:#fff;">Recharger son MULTIPASS :</strong>
+    </p>
+    <ul style="margin:0;padding-left:18px;color:rgba(255,255,255,0.6);font-size:0.82rem;line-height:2;">
+      <li><a href="https://opencollective.com/monnaie-libre/contribute/adhesion-5eur-mois-4726" style="color:#00f5ff;">5 Ẑ / mois (adhésion)</a></li>
+      <li><a href="https://opencollective.com/monnaie-libre/projects/coeurbox/contribute/membre-resident-soutien-mensuel-98389" style="color:#00f5ff;">20 Ẑ / mois (membre résident)</a></li>
+      <li><a href="https://opencollective.com/monnaie-libre/projects/coeurbox/contribute/cotisation-services-cloud-usage-98388" style="color:#00f5ff;">Recharge ponctuelle</a></li>
+    </ul>
+  </div>
+
+  <!-- UN BUG ? -->
+  <div style="background:rgba(255,68,136,0.05);border-left:3px solid #ff4488;padding:14px 18px;margin-bottom:24px;border-radius:0 4px 4px 0;">
+    <p style="margin:0;color:rgba(255,255,255,0.65);font-size:0.82rem;line-height:1.7;">
+      <strong style="color:#ff4488;">🐛 Un bug ? Une amélioration ?</strong><br>
+      Pas de panique, tout ne fonctionne pas parfaitement — c'est la <strong>phase Alpha</strong>.
+      Votre retour est précieux pour améliorer l'UX !<br>
+      Écrivez à <a href="mailto:support@qo-op.com" style="color:#00f5ff;">support@qo-op.com</a>
+      ou sur <a href="https://coracle.copylaradio.com" style="color:#00f5ff;">Coracle</a>.
+    </p>
+  </div>
+
+  {{STATION_CARD}}
+
+  <!-- BIEN COMMUN + FEEDBACK -->
+  <div style="background:rgba(0,255,136,0.04);border:1px solid rgba(0,255,136,0.09);padding:14px 18px;margin-bottom:18px;border-radius:4px;text-align:center;">
+    <p style="font-size:0.8rem;color:rgba(255,255,255,0.5);margin:0 0 10px;line-height:1.65;">
+      🌍 UPlanet est un <strong style="color:rgba(255,255,255,0.8);">bien commun numérique</strong>
+      géré par et pour la communauté.<br>
+      Chaque retour d'expérience améliore le service pour tous.
+    </p>
+    <a href="https://ipfs.copylaradio.com/ipns/copylaradio.com/feedback.html"
+       style="display:inline-block;background:rgba(0,255,136,0.12);color:#00ff88;
+              padding:7px 18px;border-radius:5px;text-decoration:none;font-size:0.82rem;
+              border:1px solid rgba(0,255,136,0.25);">
+      🐛 Un bug ? Une amélioration ?
+    </a>
+  </div>
+
+  <!-- FOOTER -->
+  <div style="text-align:center;padding-top:20px;border-top:1px solid rgba(255,255,255,0.06);">
+    <p style="font-family:'Courier New',monospace;font-size:0.65rem;color:rgba(255,255,255,0.22);margin:0 0 6px;letter-spacing:1px;">
+      © 2024-2026 ASTROPORT.ONE · AGPL-3.0
+    </p>
+    <p style="font-size:0.72rem;color:rgba(255,255,255,0.2);margin:0 0 6px;">
+      Cet email a été généré automatiquement par OC2UPlanet pour la station <code style="color:rgba(0,245,255,0.4);">{{UPLANETNAME}}</code>.
+    </p>
+    <p style="margin:0;font-size:0.68rem;">
+      <a href="{{UNSUB_URL}}" style="color:rgba(255,255,255,0.22);text-decoration:none;border-bottom:1px dotted rgba(255,255,255,0.18);">
+        Gérer mes préférences de notification
+      </a>
+    </p>
+  </div>
+
+</div>
+</body>
+</html>

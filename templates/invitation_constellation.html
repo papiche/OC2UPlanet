@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#050a12;color:#e0f0ff;font-family:'Segoe UI',Arial,sans-serif;">
+<div style="max-width:640px;margin:0 auto;padding:32px 20px;">
+
+  <!-- HEADER -->
+  <div style="text-align:center;padding:28px 0 20px;border-bottom:1px solid rgba(138,43,226,0.4);margin-bottom:28px;">
+    <h1 style="font-family:'Courier New',monospace;color:#00f5ff;font-size:1.9rem;letter-spacing:4px;margin:0;">
+      ASTRO<span style="color:#00ff88;">PORT</span>.ONE
+    </h1>
+    <p style="color:rgba(255,255,255,0.4);font-size:0.72rem;letter-spacing:3px;margin:8px 0 0;font-family:'Courier New',monospace;">
+      ✨ P A R R A I N  C O N S T E L L A T I O N
+    </p>
+  </div>
+
+  <!-- MERCI PARRAIN -->
+  <div style="background:rgba(138,43,226,0.1);border-left:3px solid #9b59b6;padding:18px 20px;margin-bottom:24px;border-radius:0 4px 4px 0;">
+    <h2 style="font-family:'Courier New',monospace;color:#c39bd3;font-size:1rem;letter-spacing:2px;margin:0 0 10px;">
+      ✨ BIENVENUE PARRAIN CONSTELLATION !
+    </h2>
+    <p style="margin:0;color:rgba(255,255,255,0.75);font-size:0.9rem;line-height:1.75;">
+      Votre parrainage de <strong style="color:#fff;">{{AMOUNT}}&nbsp;€/an</strong>
+      (offre&nbsp;: <em style="color:#c39bd3;">{{TIER_SLUG}}</em>) propulse
+      <strong>une station GPU</strong> dans la constellation UPlanet.<br>
+      Tracé dans la blockchain Duniter, converti en <strong style="color:#00ff88;">Ẑen</strong>.
+    </p>
+  </div>
+
+  <!-- ZEN CARD -->
+  <div style="background:rgba(138,43,226,0.06);border:1px solid rgba(138,43,226,0.3);padding:18px 20px;margin-bottom:20px;border-radius:4px;">
+    <div style="font-family:'Courier New',monospace;font-size:0.62rem;color:#c39bd3;letter-spacing:4px;margin-bottom:8px;">// VOTRE ZEN CARD</div>
+    <h3 style="font-family:'Courier New',monospace;color:#c39bd3;font-size:1rem;letter-spacing:2px;margin:0 0 12px;">Répartition SCIC (33/33/33/1)</h3>
+    <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+      <tr>
+        <td style="padding:5px 8px;color:rgba(255,255,255,0.5);width:60%;">→ Votre MULTIPASS (1/3)</td>
+        <td style="padding:5px 8px;color:#00ff88;font-family:'Courier New',monospace;">~{{AMOUNT}} Ẑ</td>
+      </tr>
+      <tr>
+        <td style="padding:5px 8px;color:rgba(255,255,255,0.5);">→ Coopérative (2/3 : Trésorerie + R&D + Fonds)</td>
+        <td style="padding:5px 8px;color:#c39bd3;font-family:'Courier New',monospace;">~2×{{AMOUNT}} Ẑ</td>
+      </tr>
+    </table>
+    <p style="color:rgba(255,255,255,0.45);font-size:0.78rem;margin:12px 0 0;line-height:1.6;">
+      Vous participez au vote coopératif sur le fléchage des investissements via
+      <a href="https://ipfs.copylaradio.com/ipns/copylaradio.com/crowdfunding.html" style="color:#c39bd3;">crowdfunding UPlanet</a>.
+    </p>
+  </div>
+
+  <!-- SERVICES DÉBLOQUÉS -->
+  <div style="background:rgba(0,0,0,0.3);border:1px solid rgba(138,43,226,0.25);padding:18px 20px;margin-bottom:20px;border-radius:4px;">
+    <div style="font-family:'Courier New',monospace;font-size:0.62rem;color:#c39bd3;letter-spacing:4px;margin-bottom:8px;">// SERVICES DÉBLOQUÉS</div>
+    <h3 style="font-family:'Courier New',monospace;color:#c39bd3;font-size:1rem;letter-spacing:2px;margin:0 0 12px;">GPU + IA + uDRIVE 128 Go</h3>
+    <ul style="margin:0;padding-left:18px;color:rgba(255,255,255,0.6);font-size:0.85rem;line-height:2.1;">
+      <li><strong style="color:#fff;">#BRO (IA)</strong> — accès prioritaire aux LLMs (Ollama) et à ComfyUI hébergés par la constellation</li>
+      <li><strong style="color:#fff;">GPU partagé</strong> — VRAM contributive pour les calculs IA du swarm (Power-Score élevé)</li>
+      <li><strong style="color:#fff;">uDRIVE 128 Go</strong> — stockage IPFS chiffré relié à votre MULTIPASS</li>
+      <li><strong style="color:#fff;">Nextcloud</strong> — agenda, contacts, fichiers en P2P</li>
+      <li><strong style="color:#fff;">NOSTR Relay</strong> — accès constellation <code style="color:#c39bd3;">wss://relay.copylaradio.com</code></li>
+    </ul>
+    <div style="background:rgba(138,43,226,0.08);border:1px dashed rgba(138,43,226,0.3);padding:10px;border-radius:4px;margin-top:14px;text-align:center;">
+      <span style="font-family:'Courier New',monospace;color:#c39bd3;font-size:0.82rem;">
+        Jusqu'à <strong style="font-size:1.1rem;">75 Ẑ / semaine</strong> en rétribution Capitaine
+      </span>
+    </div>
+  </div>
+
+  <!-- CRÉER MULTIPASS -->
+  <div style="background:rgba(255,136,0,0.05);border:1px solid rgba(255,136,0,0.25);padding:20px;margin-bottom:20px;border-radius:4px;">
+    <div style="font-family:'Courier New',monospace;font-size:0.62rem;color:#ffa500;letter-spacing:4px;margin-bottom:8px;">// ACTION REQUISE</div>
+    <h3 style="font-family:'Courier New',monospace;color:#ffa500;font-size:1rem;letter-spacing:2px;margin:0 0 12px;">🎫 Créez votre MULTIPASS</h3>
+    <p style="color:rgba(255,255,255,0.65);font-size:0.87rem;line-height:1.7;margin:0 0 14px;">
+      Installez Astroport et créez votre MULTIPASS avec
+      <strong style="color:#fff;">exactement l'adresse {{DONOR_EMAIL}}</strong> — la même qu'OpenCollective.
+    </p>
+    <div style="background:#000;border:1px dashed rgba(255,165,0,0.3);padding:12px;border-radius:4px;text-align:center;margin-bottom:16px;">
+      <code style="font-family:'Courier New',monospace;color:#ffa500;font-size:0.92rem;">
+        bash &lt;(curl -sL https://install.astroport.com)
+      </code>
+    </div>
+    <div style="text-align:center;">
+      <a href="{{PROFILE_URL}}"
+         style="display:inline-block;background:#6c3483;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold;font-size:0.85rem;margin:4px;">
+        👤 Profil du Capitaine
+      </a>
+      <a href="{{STATION_URL}}/install.html"
+         style="display:inline-block;background:#27ae60;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold;font-size:0.85rem;margin:4px;">
+        📖 Guide d'installation
+      </a>
+    </div>
+  </div>
+
+  <!-- APPS EN COURS -->
+  <div style="border:1px solid rgba(138,43,226,0.15);padding:18px 20px;margin-bottom:20px;border-radius:4px;">
+    <div style="font-family:'Courier New',monospace;font-size:0.62rem;color:#c39bd3;letter-spacing:4px;margin-bottom:8px;">// APPLICATIONS 🚧</div>
+    <table style="width:100%;border-collapse:collapse;">
+      <tr>
+        <td style="padding:6px 8px 6px 0;vertical-align:top;width:50%;">
+          <strong style="color:#c39bd3;font-size:0.83rem;">🤖 #BRO (IA)</strong><br>
+          <span style="color:rgba(255,255,255,0.5);font-size:0.78rem;">LLMs + ComfyUI sur GPU coopératif.
+          <a href="{{STATION_URL}}" style="color:#c39bd3;">Via votre station →</a></span>
+        </td>
+        <td style="padding:6px 0 6px 8px;vertical-align:top;width:50%;">
+          <strong style="color:#c39bd3;font-size:0.83rem;">💬 Coracle</strong><br>
+          <span style="color:rgba(255,255,255,0.5);font-size:0.78rem;">Réseau social NOSTR + likes ẐEN.
+          <a href="https://coracle.copylaradio.com" style="color:#c39bd3;">Ouvrir →</a></span>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:6px 8px 6px 0;vertical-align:top;">
+          <strong style="color:#c39bd3;font-size:0.83rem;">📺 NOSTR Tube</strong><br>
+          <span style="color:rgba(255,255,255,0.5);font-size:0.78rem;">Vidéo décentralisée.
+          <a href="https://u.copylaradio.com/youtube?html=1" style="color:#c39bd3;">Voir →</a></span>
+        </td>
+        <td style="padding:6px 0 6px 8px;vertical-align:top;">
+          <strong style="color:#c39bd3;font-size:0.83rem;">🎙️ VOCALS + VDO.NINJA</strong><br>
+          <span style="color:rgba(255,255,255,0.5);font-size:0.78rem;">Audio/vidéo P2P.
+          <a href="https://vdo.copylaradio.com/?room=UPLANET&effects&record" style="color:#c39bd3;">Salle UPLANET →</a></span>
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  {{STATION_CARD}}
+
+  <!-- BIEN COMMUN + FEEDBACK -->
+  <div style="background:rgba(138,43,226,0.05);border:1px solid rgba(138,43,226,0.15);padding:14px 18px;margin-bottom:18px;border-radius:4px;text-align:center;">
+    <p style="font-size:0.8rem;color:rgba(255,255,255,0.5);margin:0 0 10px;line-height:1.65;">
+      🌍 UPlanet est un <strong style="color:rgba(255,255,255,0.8);">bien commun numérique</strong>
+      géré par et pour la communauté.<br>
+      En tant que Parrain Constellation, votre retour façonne l'écosystème.
+    </p>
+    <a href="https://ipfs.copylaradio.com/ipns/copylaradio.com/feedback.html"
+       style="display:inline-block;background:rgba(138,43,226,0.12);color:#c39bd3;
+              padding:7px 18px;border-radius:5px;text-decoration:none;font-size:0.82rem;
+              border:1px solid rgba(138,43,226,0.25);">
+      🐛 Un bug ? Une amélioration ?
+    </a>
+  </div>
+
+  <!-- FOOTER -->
+  <div style="text-align:center;padding-top:20px;border-top:1px solid rgba(255,255,255,0.06);">
+    <p style="font-size:0.75rem;color:rgba(255,255,255,0.3);margin:0 0 4px;">
+      <a href="mailto:{{CAPTAIN_EMAIL}}" style="color:#c39bd3;">{{CAPTAIN_EMAIL}}</a>
+      · <a href="https://coracle.copylaradio.com" style="color:#c39bd3;">Coracle</a>
+    </p>
+    <p style="font-family:'Courier New',monospace;font-size:0.62rem;color:rgba(255,255,255,0.18);margin:0 0 4px;">
+      ASTROPORT.ONE · AGPL-3.0 · station <code>{{UPLANETNAME}}</code>
+    </p>
+    <p style="margin:0;font-size:0.68rem;">
+      <a href="{{UNSUB_URL}}" style="color:rgba(255,255,255,0.22);text-decoration:none;border-bottom:1px dotted rgba(255,255,255,0.18);">Gérer mes préférences de notification</a>
+    </p>
+  </div>
+
+</div>
+</body>
+</html>
