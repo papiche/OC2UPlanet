@@ -1968,7 +1968,7 @@ Exemple de format :
         print("-" * 40)
         
         # Chemin vers le dossier des mémoires utilisateur
-        memory_base_dir = os.path.expanduser("~/.zen/tmp/flashmem")
+        memory_base_dir = os.path.expanduser("~/.zen/flashmem")
         
         if not os.path.exists(memory_base_dir):
             print(f"❌ Dossier des mémoires non trouvé : {memory_base_dir}")
