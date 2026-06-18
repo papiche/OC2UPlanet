@@ -13,6 +13,9 @@
 set -euo pipefail
 
 MY_PATH="$(cd "$(dirname "$0")" && pwd)"
+## Protection contre les exécutions concurrentes (cron + manuel simultanés)
+exec 200>"/tmp/oc_expense_monitor.lock"
+flock -n 200 || { echo "oc_expense_monitor.sh déjà en cours — exit"; exit 0; }
 
 ## Load OC credentials from cooperative-config (NOSTR DID) or .env fallback
 COOP_CONFIG="$HOME/.zen/Astroport.ONE/tools/cooperative_config.sh"
