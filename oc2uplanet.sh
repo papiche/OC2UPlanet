@@ -66,11 +66,20 @@ show_help() {
 }
 
 show_history() {
-    if [[ -f "$EMISSION_LOG" ]]; then
-        echo "=== Emission History (last 20) ==="
-        tail -n 20 "$EMISSION_LOG" | awk -F: '{printf "Date: %s | Email: %s | Amount: %s | Tier: %s | Status: %s\n", strftime("%Y-%m-%d %H:%M:%S", $4), $1, $2, $3, $5}'
+    echo "=== Emission History (last 20 — kind 30851) ==="
+    if [[ -x "$HOME/.zen/strfry/strfry" ]]; then
+        (cd "$HOME/.zen/strfry" && ./strfry scan '{"kinds":[30851],"#t":["oc-emission"],"limit":20}' 2>/dev/null) \
+        | jq -r '
+            . as $e |
+            ($e.tags | map(select(.[0]=="email"))  | first | .[1] // "?") as $email  |
+            ($e.tags | map(select(.[0]=="amount"))  | first | .[1] // "?") as $amount |
+            ($e.tags | map(select(.[0]=="tier"))    | first | .[1] // "?") as $tier   |
+            ($e.tags | map(select(.[0]=="s"))       | first | .[1] // "?") as $status |
+            "Email: \($email) | Amount: \($amount) | Tier: \($tier) | Status: \($status)"
+        ' 2>/dev/null \
+        || { echo "(strfry indisponible — fallback emission.log)"; tail -n 20 "$EMISSION_LOG" 2>/dev/null; }
     else
-        echo "No history found."
+        [[ -f "$EMISSION_LOG" ]] && tail -n 20 "$EMISSION_LOG" || echo "No history found."
     fi
 }
 
@@ -78,7 +87,11 @@ show_status() {
     local total_backers=$(jq -r ".data.account.members.totalCount // 0" ${MY_PATH}/data/backers.json 2>/dev/null)
     local count=$(jq -s "length" ${MY_PATH}/data/current_month.credit.json 2>/dev/null)
     local total_amount=$(jq -s "[.[] | .amount.value] | add // 0" ${MY_PATH}/data/current_month.credit.json 2>/dev/null)
-    local processed=$(grep -c ":OK$" "$EMISSION_LOG" 2>/dev/null)
+    local processed=0
+    if [[ -x "$HOME/.zen/strfry/strfry" ]]; then
+        processed=$(cd "$HOME/.zen/strfry" && ./strfry scan '{"kinds":[30851],"#s":["OK"]}' 2>/dev/null | grep -c '"id"') || true
+    fi
+    [[ "${processed:-0}" -eq 0 ]] && processed=$(grep -c ":OK$" "$EMISSION_LOG" 2>/dev/null || echo 0)
 
     if [[ "$JSON_OUTPUT" == "true" ]]; then
         jq -n --arg tb "$total_backers" --arg cnt "$count" --arg ta "$total_amount" --arg pr "$processed" \
@@ -107,7 +120,7 @@ fetch_oc_data() {
 
     # Transactions (last 100)
     curl -sX POST -H "Content-Type: application/json" -H "Personal-Token: ${OCAPIKEY}" \
-        -d "{\"query\": \"query (\$slug: String) { account(slug: \$slug) { name slug transactions(limit: 100, type: CREDIT) { totalCount nodes { type fromAccount { name slug emails } amount { value currency } order { tier { slug name } } createdAt } } } }\", \"variables\": {\"slug\": \"${OCSLUG}\"}}" \
+        -d "{\"query\": \"query (\$slug: String) { account(slug: \$slug) { name slug transactions(limit: 1000, type: CREDIT) { totalCount nodes { type fromAccount { name slug emails } amount { value currency } order { tier { slug name } } createdAt } } } }\", \"variables\": {\"slug\": \"${OCSLUG}\"}}" \
         "${OC_API}" > ${MY_PATH}/data/tx.json
 
     # Time splits
@@ -255,8 +268,96 @@ find ./data -mtime +1 -type f -exec rm '{}' \; 2>/dev/null
 ## EMISSION ẐEN
 ########################################################################
 if [[ -f "$EMISSION_LOG" ]]; then
-    tail -n 10000 "$EMISSION_LOG" > "${EMISSION_LOG}.tmp" && mv "${EMISSION_LOG}.tmp" "$EMISSION_LOG"
+    cutoff_ts=$(date -d "90 days ago" +%s 2>/dev/null)
+    if [[ -n "$cutoff_ts" ]]; then
+        grep -E ':[0-9]{10}:(OK|FAIL)$' "$EMISSION_LOG" \
+        | awk -F: -v cut="$cutoff_ts" '$(NF-1)+0 >= cut' \
+        > "${EMISSION_LOG}.tmp" && mv "${EMISSION_LOG}.tmp" "$EMISSION_LOG"
+    fi
 fi
+
+########################################################################
+## NOSTR kind 30851 — Preuve de paiement ẐEN (source de vérité)
+########################################################################
+
+## Chargement lazy de la clé NOSTR du Capitaine
+CAPTAIN_NOSTR_KEYFILE=""
+trap '[[ -n "$CAPTAIN_NOSTR_KEYFILE" ]] && rm -f "$CAPTAIN_NOSTR_KEYFILE"' EXIT INT TERM
+
+_init_captain_nostr_key() {
+    [[ -n "$CAPTAIN_NOSTR_KEYFILE" ]] && return 0
+    local _secret="$HOME/.zen/game/nostr/${CAPTAIN_TARGET}/.secret.nostr"
+    [[ ! -s "$_secret" ]] && return 1
+    local _raw _nsec
+    _raw=$(cat "$_secret" 2>/dev/null)
+    _nsec=$(echo "$_raw" | grep -oP 'NSEC=\K[^;]+' || true)
+    [[ -z "$_nsec" || "$_nsec" != nsec1* ]] && _nsec=$(echo "$_raw" | grep -oP 'nsec1[a-z0-9]+' || true)
+    [[ "$_nsec" != nsec1* ]] && return 1
+    CAPTAIN_NOSTR_KEYFILE=$(mktemp /tmp/oc_nostr_key_XXXXXX)
+    echo "NSEC=$_nsec;" > "$CAPTAIN_NOSTR_KEYFILE"
+}
+
+## Vérification idempotence via relay local (kind 30851) avec fallback emission.log
+_check_emission_nostr() {
+    local tx_d="oc-emission-${1}"
+    local found=0
+    if [[ -x "$HOME/.zen/strfry/strfry" ]]; then
+        found=$(cd "$HOME/.zen/strfry" && \
+            ./strfry scan "{\"kinds\":[30851],\"#d\":[\"${tx_d}\"]}" 2>/dev/null \
+            | grep -c '"id"') || found=0
+    fi
+    [[ "${found:-0}" -gt 0 ]] && return 0
+    grep -qF "$1" "$EMISSION_LOG" 2>/dev/null
+}
+
+## Publication preuve de paiement (kind 30851) + écriture audit trail emission.log
+_publish_emission_proof() {
+    local email="$1" amount="$2" tier_slug="$3" raw_email="${4:-$1}" created_at="$5" status="${6:-OK}"
+    local tx_d="oc-emission-${raw_email}:${amount}:${created_at}"
+
+    ## Écriture audit trail local (fallback + migration)
+    echo "${raw_email}:${amount}:${created_at}:${amount}:${tier_slug:-unknown}:$(date +%s):${status}" >> "$EMISSION_LOG"
+
+    _init_captain_nostr_key || return 1
+    [[ -z "${UPLANETG1PUB:-}" ]] && return 1
+
+    local content_json
+    content_json=$(jq -cn \
+        --arg email "$email" \
+        --arg raw_email "$raw_email" \
+        --arg amount "$amount" \
+        --arg tier_slug "${tier_slug:-unknown}" \
+        --arg oc_created_at "$created_at" \
+        --arg status "$status" \
+        --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+        --arg uplanet "${UPLANETG1PUB}" \
+        '{email:$email,raw_email:$raw_email,amount:$amount,tier_slug:$tier_slug,
+          oc_created_at:$oc_created_at,status:$status,generated_at:$generated_at,
+          uplanet:$uplanet}') || return 1
+
+    local tags_json
+    tags_json=$(jq -cn \
+        --arg d "$tx_d" \
+        --arg email "$email" \
+        --arg amount "$amount" \
+        --arg tier "${tier_slug:-unknown}" \
+        --arg s "$status" \
+        --arg constellation "${UPLANETG1PUB}" \
+        '[["d",$d],["t","uplanet"],["t","oc-emission"],["s",$s],
+          ["email",$email],["amount",$amount],["tier",$tier],
+          ["constellation",$constellation]]') || return 1
+
+    python3 "${ASTROPORT}/tools/nostr_send_note.py" \
+        --keyfile "$CAPTAIN_NOSTR_KEYFILE" \
+        --kind 30851 \
+        --content "$(echo "$content_json" | jq -c .)" \
+        --tags "$tags_json" \
+        --relay "ws://127.0.0.1:7777" 2>/dev/null
+    local rc=$?
+    [[ $rc -eq 0 ]] && [[ "$JSON_OUTPUT" == "false" ]] && \
+        echo "✅ Preuve 30851 publiée : ${email} ${amount}Ẑ [${status}]"
+    return $rc
+}
 
 dispatch_zen_emission() {
     local email="$1" amount="$2" tier_slug="$3"
@@ -409,11 +510,17 @@ _send_multipass_invitation() {
         fi
     fi
 
-    ## Ne pas envoyer depuis une station publiquement routable (uSPOT + myIPFS)
-    ## Une telle station est déjà visible — la compétition par email est pour les nœuds locaux
-    _oc_pub() { [[ -n "$1" ]] && ! echo "$1" | grep -qE '(localhost|127\.|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)'; }
-    if _oc_pub "${uSPOT}" && _oc_pub "${myIPFS}"; then
-        [[ "$JSON_OUTPUT" == "false" ]] && echo "ℹ️  Station publique (uSPOT+myIPFS routables) — invitation concurrentielle inactive"
+    ## Seule la station primaire (tête de liste dans A_boostrap_nodes.txt) envoie les invitations
+    local is_primary=false
+    local strapfile="${HOME}/.zen/game/MY_boostrap_nodes.txt"
+    [[ ! -f "$strapfile" ]] && strapfile="${HOME}/.zen/Astroport.ONE/A_boostrap_nodes.txt"
+    if [[ -f "$strapfile" ]]; then
+        local primary_strap
+        primary_strap=$(grep -Ev '#' "$strapfile" | rev | cut -d '/' -f 1 | rev | grep -v '^[[:space:]]*$' | head -n 1)
+        [[ "$IPFSNODEID" == "$primary_strap" ]] && is_primary=true
+    fi
+    if [[ "$is_primary" == "false" ]]; then
+        [[ "$JSON_OUTPUT" == "false" ]] && echo "ℹ️  Station non-primaire — délégation de l'invitation à la station principale"
         return 0
     fi
 
@@ -529,19 +636,22 @@ PYEOF
 }
 
 [[ "$JSON_OUTPUT" == "false" ]] && echo "=== Processing current month credits ==="
-while IFS= read -r credit_json; do
-    [[ -z "$credit_json" ]] && continue
-    slug=$(echo "$credit_json" | jq -r '.fromAccount.slug // empty')
-    email=$(echo "$credit_json" | jq -r '.fromAccount.emails[0] // empty')
-    amount=$(echo "$credit_json" | jq -r '.amount.value // 0')
-    created_at=$(echo "$credit_json" | jq -r '.createdAt // empty')
-    tier_slug=$(echo "$credit_json" | jq -r '.order.tier.slug // empty')
+jq -r '
+    [
+        (.fromAccount.slug // ""),
+        (.fromAccount.emails[0] // ""),
+        (.amount.value // 0 | tostring),
+        (.createdAt // ""),
+        (.order.tier.slug // "")
+    ] | @tsv
+' "${MY_PATH}/data/current_month.credit.json" 2>/dev/null | while IFS=$'\t' read -r slug raw_email amount created_at tier_slug; do
 
-    [[ -z "$email" || "$email" == "null" ]] && email=$(jq -r --arg s "$slug" '.[$s] // empty' ${MY_PATH}/data/slug_email_map.json 2>/dev/null)
+    email="$raw_email"
+    [[ -z "$email" || "$email" == "null" ]] && email=$(jq -r --arg s "$slug" '.[$s] // empty' "${MY_PATH}/data/slug_email_map.json" 2>/dev/null)
     [[ -z "$email" || "$email" == "null" ]] && continue
 
-    tx_id="${email}:${amount}:${created_at}"
-    grep -qF "$tx_id" "$EMISSION_LOG" 2>/dev/null && continue
+    tx_id="${raw_email}:${amount}:${created_at}"
+    _check_emission_nostr "$tx_id" && continue
 
     ## Routage des tiers labo/R&D : l'email cible est le Capitaine, pas le donateur
     _effective_email="$email"
@@ -581,8 +691,11 @@ while IFS= read -r credit_json; do
     else
         dispatch_zen_emission "${email}" "${amount}" "${tier_slug}"
     fi
-    [[ $? -eq 0 ]] && echo "${tx_id}:${amount}:${tier_slug}:$(date +%s):OK" >> "$EMISSION_LOG" || echo "${tx_id}:${amount}:${tier_slug}:$(date +%s):FAIL" >> "$EMISSION_LOG"
-done < <(jq -c '.' ${MY_PATH}/data/current_month.credit.json 2>/dev/null)
+    _dispatch_rc=$?
+    _dispatch_status="FAIL"
+    [[ $_dispatch_rc -eq 0 ]] && _dispatch_status="OK"
+    _publish_emission_proof "$email" "$amount" "$tier_slug" "$raw_email" "$created_at" "$_dispatch_status"
+done
 
 [[ "$JSON_OUTPUT" == "false" ]] && echo "=== ẐEN emission complete ==="
 [[ -x "$MY_PATH/oc_expense_monitor.sh" ]] && "$MY_PATH/oc_expense_monitor.sh" >/dev/null 2>&1 || true
