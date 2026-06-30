@@ -588,6 +588,7 @@ _send_multipass_invitation() {
             -e "s|{{PROFILE_URL}}|${profile_url}|g" \
             -e "s|{{CAPTAIN_EMAIL}}|${CAPTAIN_TARGET:-support@qo-op.com}|g" \
             -e "s|{{UPLANETNAME}}|${UPLANETNAME:0:8}|g" \
+            -e "s|{{UNSUB_URL}}|${station_url}|g" \
             "$template_file" > "$tmp_html"
     else
         cat > "$tmp_html" << HTMLEOF
