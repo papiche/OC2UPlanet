@@ -536,11 +536,9 @@ _send_multipass_invitation() {
     local captain_npub=""
     [[ -n "$CAPTAIN_TARGET" ]] && captain_npub=$(cat ~/.zen/game/nostr/${CAPTAIN_TARGET}/NPUB 2>/dev/null)
 
-    ## URL publique de la station — domaine DNS > Yggdrasil > fallback coopératif
+    ## URL publique de la station
     local station_url
-    if [[ -n "$myDOMAIN" ]]; then
-        station_url="https://${myDOMAIN}"
-    elif [[ -n "$uSPOT" ]]; then
+    if [[ -n "$uSPOT" ]]; then
         station_url="$uSPOT"
     else
         station_url="https://u.copylaradio.com"
@@ -549,7 +547,7 @@ _send_multipass_invitation() {
     ## Profil NOSTR du capitaine (viewer public sur la station ou Coracle)
     local profile_url
     if [[ -n "$captain_npub" ]]; then
-        profile_url="${station_url}/nostr_profile_viewer.html?npub=${captain_npub}"
+        profile_url="${station_url}/earth/nostr_profile_viewer.html?npub=${captain_npub}"
     else
         profile_url="https://coracle.copylaradio.com"
     fi
