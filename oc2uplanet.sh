@@ -118,9 +118,13 @@ fetch_oc_data() {
     jq -r '.data.account.members.nodes[] | "\(.account.slug):\(.account.emails[0])"' ${MY_PATH}/data/backers.json > ${MY_PATH}/data/slugemail.list
     cat ${MY_PATH}/data/slugemail.list | awk -F: '{print "{\"" $1 "\": \"" $2 "\"}"}' | jq -s 'add' > ${MY_PATH}/data/slug_email_map.json
 
-    # Transactions (last 100)
+    # Transactions (last 1000) — includeChildrenTransactions: true est INDISPENSABLE
+    # pour voir les contributions aux Projects enfants (ex: atom4love, coeurbox, stiits
+    # sous monnaie-libre) : sans ce flag, Account.transactions ne retourne QUE les
+    # transactions dont toAccount == ce slug précis, jamais celles des projets enfants
+    # (vérifié empiriquement : 480 tx sans le flag, 484 avec — 4 tx enfants invisibles).
     curl -sX POST -H "Content-Type: application/json" -H "Personal-Token: ${OCAPIKEY}" \
-        -d "{\"query\": \"query (\$slug: String) { account(slug: \$slug) { name slug transactions(limit: 1000, type: CREDIT) { totalCount nodes { type fromAccount { name slug emails } amount { value currency } order { tier { slug name } } createdAt } } } }\", \"variables\": {\"slug\": \"${OCSLUG}\"}}" \
+        -d "{\"query\": \"query (\$slug: String) { account(slug: \$slug) { name slug transactions(limit: 1000, type: CREDIT, includeChildrenTransactions: true) { totalCount nodes { type fromAccount { name slug emails } toAccount { slug name } amount { value currency } order { tier { slug name } } createdAt } } } }\", \"variables\": {\"slug\": \"${OCSLUG}\"}}" \
         "${OC_API}" > ${MY_PATH}/data/tx.json
 
     # Time splits
@@ -141,12 +145,12 @@ show_scan() {
         ' ${MY_PATH}/data/tx.json
     else
         echo ""
-        echo "=== OpenCollective Scan : ${OCSLUG} ==="
-        printf "%-20s | %-15s | %-25s | %-10s | %-15s | %s\n" "Name" "Slug" "Email" "Amount" "Tier" "Date"
-        echo "----------------------------------------------------------------------------------------------------------------------------"
-        jq -r '.data.account.transactions.nodes[] | "\(.fromAccount.name // "-"):\(.fromAccount.slug):\(.fromAccount.emails[0] // "-"):\(.amount.value) \(.amount.currency):\(.order.tier.name // "-"):\(.createdAt)"' ${MY_PATH}/data/tx.json | while IFS=: read -r name slug email amount tier date; do
+        echo "=== OpenCollective Scan : ${OCSLUG} (+ projets enfants) ==="
+        printf "%-20s | %-15s | %-25s | %-10s | %-15s | %-12s | %s\n" "Name" "Slug" "Email" "Amount" "Tier" "Project" "Date"
+        echo "----------------------------------------------------------------------------------------------------------------------------------------"
+        jq -r '.data.account.transactions.nodes[] | "\(.fromAccount.name // "-"):\(.fromAccount.slug):\(.fromAccount.emails[0] // "-"):\(.amount.value) \(.amount.currency):\(.order.tier.name // "-"):\(.toAccount.slug // "-"):\(.createdAt)"' ${MY_PATH}/data/tx.json | while IFS=: read -r name slug email amount tier project date; do
             [[ "$email" == "-" ]] && email=$(jq -r --arg s "$slug" '.[$s] // "-"' ${MY_PATH}/data/slug_email_map.json 2>/dev/null)
-            printf "%-20.20s | %-15.15s | %-25.25s | %-10s | %-15.15s | %s\n" "$name" "$slug" "$email" "$amount" "$tier" "$date"
+            printf "%-20.20s | %-15.15s | %-25.25s | %-10s | %-15.15s | %-12.12s | %s\n" "$name" "$slug" "$email" "$amount" "$tier" "$project" "$date"
         done
     fi
 }
@@ -641,9 +645,10 @@ jq -r '
         (.fromAccount.emails[0] // ""),
         (.amount.value // 0 | tostring),
         (.createdAt // ""),
-        (.order.tier.slug // "")
+        (.order.tier.slug // ""),
+        (.toAccount.slug // "")
     ] | @tsv
-' "${MY_PATH}/data/current_month.credit.json" 2>/dev/null | while IFS=$'\t' read -r slug raw_email amount created_at tier_slug; do
+' "${MY_PATH}/data/current_month.credit.json" 2>/dev/null | while IFS=$'\t' read -r slug raw_email amount created_at tier_slug to_project; do
 
     email="$raw_email"
     [[ -z "$email" || "$email" == "null" ]] && email=$(jq -r --arg s "$slug" '.[$s] // empty' "${MY_PATH}/data/slug_email_map.json" 2>/dev/null)
@@ -651,6 +656,9 @@ jq -r '
 
     tx_id="${raw_email}:${amount}:${created_at}"
     _check_emission_nostr "$tx_id" && continue
+
+    [[ "$JSON_OUTPUT" == "false" && -n "$to_project" && "$to_project" != "$OCSLUG" ]] && \
+        echo "🌱 Contribution au projet enfant '${to_project}' (tier: ${tier_slug:-?}) — ${email} : ${amount}€"
 
     ## Routage des tiers labo/R&D : l'email cible est le Capitaine, pas le donateur
     _effective_email="$email"
