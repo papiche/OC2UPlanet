@@ -48,7 +48,8 @@ empêche les exécutions multiples dans le même mois.
 Lancement manuel :
 ```bash
 cd ~/.zen/workspace/OC2UPlanet
-./oc2uplanet.sh
+./oc2uplanet.sh          # vue synthétique, sans émission (voir aussi --sync, --status)
+./oc2uplanet.sh --run    # déclenche réellement l'émission Ẑen du mois
 ```
 
 ### Webhook temps réel (optionnel)

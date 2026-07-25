@@ -1,7 +1,6 @@
 # Guide : Configurer OpenCollective pour une nouvelle UPlanet ẐEN
 
-Ce guide explique pas à pas comment créer et configurer un collectif OpenCollective
-pour alimenter l'économie ẐEN d'une station UPlanet.
+Ce guide explique pas à pas comment créer et configurer un collectif OpenCollective pour alimenter l'économie ẐEN d'une station UPlanet.
 
 ## Vue d'ensemble
 
@@ -70,9 +69,18 @@ Depuis l'admin du projet (`/admin/tiers`), créez exactement ces 4 tiers :
 - **Description** : Soutien mensuel d'un membre résident.
   Le montant est converti en ẐEN d'usage sur le MULTIPASS (1€ = 1Ẑ), cycle mensuel.
 
-> **Important** : Les slugs doivent contenir les mots-clés exacts (`128-go`, `gpu`,
-> `cotisation`, `cloud`, `membre-resident`, `soutien-mensuel`) car le dispatch
-> dans `oc2uplanet.sh` utilise du pattern matching sur ces slugs.
+> **Important** : le dispatch dans `oc2uplanet.sh` route chaque contribution (satellite /
+> constellation / labo-R&D / cloud) par pattern matching sur le slug du tier OC. Ces motifs
+> sont **configurables** via `cooperative_config.sh` (clés `TIER_SLUG_SATELLITE`,
+> `TIER_SLUG_CONSTELLATION`, `TIER_SLUG_LABO`, `TIER_SLUG_CLOUD` — listes de globs séparées
+> par des virgules). Par défaut (si ces clés ne sont pas définies dans la config coopérative),
+> `oc2uplanet.sh` retombe sur les motifs historiques couvrant les mots-clés `128-go`, `gpu`,
+> `cotisation`, `cloud`, `membre-resident`, `soutien-mensuel`. Si vous renommez un tier OC avec
+> un slug qui ne correspond à aucun motif, mettez à jour la clé correspondante :
+> ```bash
+> source ~/.zen/Astroport.ONE/tools/cooperative_config.sh
+> coop_config_set TIER_SLUG_SATELLITE "*parrainage*128*,*extension-128*,*satellite*,*love-box*claude*,*mon-nouveau-slug*"
+> ```
 
 ---
 
@@ -232,14 +240,15 @@ chmod +x oc2uplanet.sh
 ### 3.4 Test manuel
 
 ```bash
-./oc2uplanet.sh
+./oc2uplanet.sh --sync   # vue par compte, sans émission (vérifier les données avant de lancer --run)
+./oc2uplanet.sh --run    # déclenche réellement l'émission Ẑen du mois
 ```
 
 Vérifiez :
 - `data/backers.json` contient les backers
 - `data/tx.json` contient les transactions avec les tiers
 - `data/current_month.credit.json` filtre correctement le mois en cours
-- `data/emission.log` trace les émissions effectuées
+- `data/emission.log` trace les émissions effectuées (après `--run`)
 
 ---
 

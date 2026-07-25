@@ -21,6 +21,13 @@ Chaque versement CREDIT sur OpenCollective déclenche l'émission de ẐEN équi
 **Note :** Les sociétaires (Satellite/Constellation) ne rechargent pas le MULTIPASS.
 Le MULTIPASS reçoit son crédit initial à la création (`make_NOSTRCARD.sh` → PRIMO TX 1Ğ1).
 
+**Routage configurable** : le slug ci-dessus n'est qu'un exemple par défaut. La correspondance
+slug → catégorie (satellite/constellation/labo/cloud) est pilotée par les clés
+`TIER_SLUG_SATELLITE` / `TIER_SLUG_CONSTELLATION` / `TIER_SLUG_LABO` / `TIER_SLUG_CLOUD` de
+`cooperative_config.sh` (listes de globs séparées par des virgules, ex. `*satellite*,*love-box*claude*`).
+Si ces clés sont absentes de la config coopérative, `oc2uplanet.sh` retombe sur les motifs
+historiques codés en dur (`_tier_matches()` dans le script).
+
 ## Structure du projet
 
 ```
@@ -69,14 +76,17 @@ Marqueur d'idempotence mensuel : `~/.zen/game/.oc2uplanet_monthly.done`
 **Manuel** :
 ```bash
 cd ~/.zen/workspace/OC2UPlanet
-./oc2uplanet.sh                # Traitement du mois courant
+./oc2uplanet.sh                # Vue synthétique (= --status), AUCUNE émission Ẑen
+./oc2uplanet.sh --sync         # Détail par compte : montant, tier, MULTIPASS, statut émission
+./oc2uplanet.sh --status       # Résumé du mois courant (totaux + synchro OK/FAIL/pending)
 ./oc2uplanet.sh --scan         # Lister tous les backers et contributions
 ./oc2uplanet.sh --ranking      # Classement par contribution + statut actif
 ./oc2uplanet.sh --alerts       # Abonnements arrêtés ou modifiés
-./oc2uplanet.sh --status       # Résumé du mois courant
 ./oc2uplanet.sh --history      # 20 dernières transactions traitées
-./oc2uplanet.sh --manual       # Mode interactif validation/édition
-./oc2uplanet.sh --json         # Sortie JSON machine-readable
+./oc2uplanet.sh --json         # Sortie JSON machine-readable (combinable avec les options ci-dessus)
+
+./oc2uplanet.sh --run          # Traite le mois courant et ÉMET les Ẑen (usage cron)
+./oc2uplanet.sh --manual       # Comme --run, en mode interactif validation/édition
 ```
 
 ## Idempotence

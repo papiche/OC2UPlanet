@@ -39,8 +39,30 @@ if [[ -z "${OCAPIKEY}" && -f "${COOP_CONFIG}" ]]; then
     [[ -n "${_coop_ocslug}" && -z "${OCSLUG}" ]] && export OCSLUG="${_coop_ocslug}"
     _coop_oc_api=$(coop_config_get "OC_API" 2>/dev/null)
     [[ -n "${_coop_oc_api}" && -z "${OC_API}" ]] && export OC_API="${_coop_oc_api}"
+
+    ## Motifs de routage par tier (satellite/constellation/labo/cloud), configurables
+    ## via `cooperative_config.sh coop_config_set TIER_SLUG_XXX "*motif1*,*motif2*"`.
+    [[ -z "${TIER_SLUG_SATELLITE}" ]] && TIER_SLUG_SATELLITE=$(coop_config_get "TIER_SLUG_SATELLITE" 2>/dev/null)
+    [[ -z "${TIER_SLUG_CONSTELLATION}" ]] && TIER_SLUG_CONSTELLATION=$(coop_config_get "TIER_SLUG_CONSTELLATION" 2>/dev/null)
+    [[ -z "${TIER_SLUG_LABO}" ]] && TIER_SLUG_LABO=$(coop_config_get "TIER_SLUG_LABO" 2>/dev/null)
+    [[ -z "${TIER_SLUG_CLOUD}" ]] && TIER_SLUG_CLOUD=$(coop_config_get "TIER_SLUG_CLOUD" 2>/dev/null)
 fi
 [[ -z "${OC_API}" ]] && OC_API="https://api.opencollective.com/graphql/v2"
+
+## Repli sur les motifs historiques si la config coopérative n'expose pas encore ces clés
+[[ -z "${TIER_SLUG_SATELLITE}" ]] && TIER_SLUG_SATELLITE="*parrainage*128*,*extension-128*,*satellite*,*love-box*claude*"
+[[ -z "${TIER_SLUG_CONSTELLATION}" ]] && TIER_SLUG_CONSTELLATION="*parrainage*gpu*,*module-gpu*,*constellation*,*love-box*deluxe*,*love-box*gpu*"
+[[ -z "${TIER_SLUG_LABO}" ]] && TIER_SLUG_LABO="*infrastructure*,*labo*,*genereux-donateur*,*r-d*,*recherche*"
+[[ -z "${TIER_SLUG_CLOUD}" ]] && TIER_SLUG_CLOUD="*membre-resident*,*cloud-usage*,*adhesion*"
+
+## Teste si $1 (tier_slug) correspond à l'une des globs de la liste $2 (séparées par des virgules)
+_tier_matches() {
+    local slug="$1" patterns="$2" IFS="," p
+    for p in $patterns; do
+        [[ "$slug" == $p ]] && return 0
+    done
+    return 1
+}
 
 ## Station variables (CAPTAINEMAIL, uSPOT, myDOMAIN, myIPFS…)
 [[ -z "$myDOMAIN" && -f "${ASTROPORT}/tools/my.sh" ]] && source "${ASTROPORT}/tools/my.sh" 2>/dev/null
@@ -53,15 +75,28 @@ CAPTAIN_TARGET="${CAPTAINEMAIL:-$(cat ~/.zen/game/players/.current/.player 2>/de
 show_help() {
     echo "Usage: $0 [OPTIONS]"
     echo ""
-    echo "Options:"
-    echo "  --manual    Interactive mode to validate/edit transactions"
+    echo "Sans option : affiche une vue synthétique (comme --status). AUCUNE émission Ẑen."
+    echo ""
+    echo "Options en lecture seule (aucune émission Ẑen) :"
+    echo "  --sync      Détail par compte : montant, tier, MULTIPASS, statut émission Ẑen"
+    echo "  --status    Résumé du mois courant (totaux + synchro OK/FAIL/pending) [= défaut]"
     echo "  --scan      List all backers and their contributions"
     echo "  --ranking   Rank backers by total contribution + active status"
     echo "  --alerts    Identify stopped or changed subscriptions"
-    echo "  --status    Show current month summary"
     echo "  --history   Show the last processed transactions"
-    echo "  --json      Modify output format to JSON"
+    echo ""
+    echo "Options d'exécution (ÉMETTENT des Ẑen) :"
+    echo "  --run       Traite le mois courant et émet les Ẑen correspondants (usage cron)"
+    echo "  --manual    Comme --run, en mode interactif validation/édition transaction par transaction"
+    echo ""
+    echo "  --json      Modify output format to JSON (peut être placé n'importe où)"
     echo "  --help      Show this help message"
+    echo ""
+    echo "Exemples :"
+    echo "  $0                     # vue synthétique, sans risque"
+    echo "  $0 --sync              # voir où en est chaque compte ce mois-ci"
+    echo "  $0 --json --sync       # idem, en JSON"
+    echo "  $0 --run               # déclenche réellement l'émission Ẑen du mois"
     echo ""
 }
 
@@ -84,6 +119,7 @@ show_history() {
 }
 
 show_status() {
+    fetch_oc_data || return 1
     local total_backers=$(jq -r ".data.account.members.totalCount // 0" ${MY_PATH}/data/backers.json 2>/dev/null)
     local count=$(jq -s "length" ${MY_PATH}/data/current_month.credit.json 2>/dev/null)
     local total_amount=$(jq -s "[.[] | .amount.value] | add // 0" ${MY_PATH}/data/current_month.credit.json 2>/dev/null)
@@ -91,17 +127,33 @@ show_status() {
     if [[ -x "$HOME/.zen/strfry/strfry" ]]; then
         processed=$(cd "$HOME/.zen/strfry" && ./strfry scan '{"kinds":[30851],"#s":["OK"]}' 2>/dev/null | grep -c '"id"') || true
     fi
-    [[ "${processed:-0}" -eq 0 ]] && processed=$(grep -c ":OK$" "$EMISSION_LOG" 2>/dev/null || echo 0)
+    if [[ "${processed:-0}" -eq 0 ]]; then
+        processed=$(grep -c ":OK$" "$EMISSION_LOG" 2>/dev/null)
+        processed="${processed:-0}"
+    fi
+
+    ## Détail mois courant : statut réel par compte (émission Ẑen + MULTIPASS)
+    local rows ok fail pending mp_missing
+    rows=$(_sync_rows | jq -s .)
+    ok=$(echo "$rows" | jq '[.[] | select(.emission_status=="ok")] | length')
+    fail=$(echo "$rows" | jq '[.[] | select(.emission_status=="fail")] | length')
+    pending=$(echo "$rows" | jq '[.[] | select(.emission_status=="pending")] | length')
+    mp_missing=$(echo "$rows" | jq '[.[] | select(.multipass_status!="local" and .multipass_status!="swarm")] | length')
 
     if [[ "$JSON_OUTPUT" == "true" ]]; then
         jq -n --arg tb "$total_backers" --arg cnt "$count" --arg ta "$total_amount" --arg pr "$processed" \
-            '{total_backers: $tb, current_month_tx: $cnt, current_month_total: $ta, processed_ok: $pr}'
+            --arg ok "$ok" --arg fail "$fail" --arg pending "$pending" --arg mp_missing "$mp_missing" \
+            '{total_backers: $tb, current_month_tx: $cnt, current_month_total: $ta, processed_ok: $pr,
+              current_month_sync: {ok: $ok, fail: $fail, pending: $pending, multipass_missing: $mp_missing}}'
     else
         echo "=== Current Status ==="
         echo "Total Backers: $total_backers"
         echo "Current Month Transactions: $count"
         echo "Current Month Total: $total_amount EUR"
         echo "Total Transactions Processed (OK): $processed"
+        echo "--- Synchro €→Ẑen (mois courant) ---"
+        echo "✅ Émis: $ok | ❌ Échec: $fail | ⏳ En attente: $pending | MULTIPASS manquant: $mp_missing"
+        [[ "$pending" -gt 0 || "$fail" -gt 0 || "$mp_missing" -gt 0 ]] && echo "→ Détail : ./oc2uplanet.sh --sync"
     fi
 }
 
@@ -242,21 +294,128 @@ show_alerts() {
     fi
 }
 
+## Croise current_month.credit.json avec l'état réel de chaque compte :
+## présence MULTIPASS (local/swarm/invité/absent) + statut émission Ẑen (OK/FAIL/pending).
+## Émet un objet JSON par ligne (à consommer avec `jq -s .`).
+_sync_rows() {
+    jq -r '
+        [
+            (.fromAccount.slug // ""),
+            (.fromAccount.emails[0] // ""),
+            (.amount.value // 0 | tostring),
+            (.createdAt // ""),
+            (.order.tier.slug // "")
+        ] | @tsv
+    ' "${MY_PATH}/data/current_month.credit.json" 2>/dev/null | while IFS=$'\t' read -r slug raw_email amount created_at tier_slug; do
+        local email="$raw_email"
+        [[ -z "$email" || "$email" == "null" ]] && email=$(jq -r --arg s "$slug" '.[$s] // empty' "${MY_PATH}/data/slug_email_map.json" 2>/dev/null)
+        [[ -z "$email" || "$email" == "null" ]] && email="$slug"
+
+        local _effective_email="$email"
+        _tier_matches "$tier_slug" "$TIER_SLUG_LABO" && _effective_email="${CAPTAIN_TARGET:-support@qo-op.com}"
+
+        local mp_status="not_invited" mp_label="❌ non invité"
+        if [[ -f "$HOME/.zen/game/nostr/${_effective_email}/G1PUBNOSTR" ]]; then
+            mp_status="local"; mp_label="✅ local"
+        else
+            local _swarm_hit
+            _swarm_hit=$(find ~/.zen/tmp/swarm -name "G1PUBNOSTR" 2>/dev/null | grep -F "/${_effective_email}/" | head -1)
+            if [[ -n "$_swarm_hit" ]]; then
+                mp_status="swarm"; mp_label="✅ swarm"
+            else
+                local last_invite
+                last_invite=$(grep -F "${_effective_email}:" "$INVITATION_LOG" 2>/dev/null | grep ":INVITED:" | tail -1 | awk -F: '{print $NF}')
+                if [[ -n "$last_invite" ]]; then
+                    mp_status="invited"; mp_label="📧 invité $(date -d "@$last_invite" +%d/%m 2>/dev/null)"
+                fi
+            fi
+        fi
+
+        local tx_id="${raw_email}:${amount}:${created_at}"
+        local _rec_s=""
+        if [[ -x "$HOME/.zen/strfry/strfry" ]]; then
+            _rec_s=$(cd "$HOME/.zen/strfry" && ./strfry scan "{\"kinds\":[30851],\"#d\":[\"oc-emission-${tx_id}\"]}" 2>/dev/null | jq -r '.tags[]? | select(.[0]=="s") | .[1]' 2>/dev/null | head -1)
+        fi
+        [[ -z "$_rec_s" ]] && _rec_s=$(grep -F "$tx_id" "$EMISSION_LOG" 2>/dev/null | tail -1 | awk -F: '{print $NF}')
+        local emis_status="pending" emis_label="⏳ en attente"
+        case "$_rec_s" in
+            OK) emis_status="ok"; emis_label="✅ OK" ;;
+            FAIL) emis_status="fail"; emis_label="❌ FAIL" ;;
+        esac
+
+        jq -cn --arg email "$email" --arg amount "$amount" --arg tier "${tier_slug:-standard}" \
+            --arg mp_status "$mp_status" --arg mp_label "$mp_label" \
+            --arg emis_status "$emis_status" --arg emis_label "$emis_label" \
+            '{email:$email, amount:($amount|tonumber), tier:$tier,
+              multipass_status:$mp_status, multipass_label:$mp_label,
+              emission_status:$emis_status, emission_label:$emis_label}'
+    done
+}
+
+show_sync() {
+    fetch_oc_data || return 1
+    local rows
+    rows=$(_sync_rows | jq -s .)
+
+    if [[ "$JSON_OUTPUT" == "true" ]]; then
+        echo "$rows"
+        return 0
+    fi
+
+    echo ""
+    echo "=== Synchro €→Ẑen : ${OCSLUG} (mois courant) ==="
+    printf "%-25s | %-10s | %-25s | %-14s | %s\n" "Email" "Montant" "Tier" "MULTIPASS" "Émission"
+    echo "----------------------------------------------------------------------------------------------------"
+    echo "$rows" | jq -r '.[] | "\(.email):\(.amount)€:\(.tier):\(.multipass_label):\(.emission_label)"' | while IFS=: read -r email amount tier mp emis; do
+        printf "%-25.25s | %-10s | %-25.25s | %-14s | %s\n" "$email" "$amount" "$tier" "$mp" "$emis"
+    done
+    echo ""
+    local total ok fail pending
+    total=$(echo "$rows" | jq 'length')
+    ok=$(echo "$rows" | jq '[.[] | select(.emission_status=="ok")] | length')
+    fail=$(echo "$rows" | jq '[.[] | select(.emission_status=="fail")] | length')
+    pending=$(echo "$rows" | jq '[.[] | select(.emission_status=="pending")] | length')
+    echo "Total: $total | ✅ Émis: $ok | ❌ Échec: $fail | ⏳ En attente: $pending"
+}
+
 ## Argument parsing
+ACTION=""
+RUN_MODE=false
 while [[ "$#" -gt 0 ]]; do
     case $1 in
-        --manual) MANUAL_MODE=true ;;
-        --scan) show_scan; exit 0 ;;
-        --ranking) show_ranking; exit 0 ;;
-        --alerts) show_alerts; exit 0 ;;
-        --status) show_status; exit 0 ;;
-        --history) show_history; exit 0 ;;
+        --manual) MANUAL_MODE=true; RUN_MODE=true ;;
+        --run) RUN_MODE=true ;;
+        --scan) ACTION="scan" ;;
+        --ranking) ACTION="ranking" ;;
+        --alerts) ACTION="alerts" ;;
+        --status) ACTION="status" ;;
+        --sync) ACTION="sync" ;;
+        --history) ACTION="history" ;;
         --json) JSON_OUTPUT=true ;;
         --help) show_help; exit 0 ;;
         *) [[ "$JSON_OUTPUT" == "false" ]] && echo "Unknown parameter: $1" && show_help; exit 1 ;;
     esac
     shift
 done
+
+if [[ -n "$ACTION" ]]; then
+    case "$ACTION" in
+        scan) show_scan ;;
+        ranking) show_ranking ;;
+        alerts) show_alerts ;;
+        status) show_status ;;
+        sync) show_sync ;;
+        history) show_history ;;
+    esac
+    exit 0
+fi
+
+## Sans --run (ni --manual) : vue synthétique par défaut, aucune émission Ẑen déclenchée.
+if [[ "$RUN_MODE" != "true" ]]; then
+    show_status
+    [[ "$JSON_OUTPUT" == "false" ]] && echo "" && echo "→ Pour émettre réellement les Ẑen de ce mois : ./oc2uplanet.sh --run"
+    exit 0
+fi
 
 [[ "$JSON_OUTPUT" == "false" ]] && echo "MONITORING ${OCSLUG} | Station: ${UPLANETNAME:0:8}..."
 
@@ -366,23 +525,22 @@ _publish_emission_proof() {
 dispatch_zen_emission() {
     local email="$1" amount="$2" tier_slug="$3"
     local zen_amount=$(echo "scale=2; $amount * 1" | bc)
-    case "$tier_slug" in
-        *parrainage*128-go*|*extension-128*|*satellite*|*love-box-le-claude*|*love-box*claude*)
-            ${ASTROPORT}/UPLANET.official.sh -s "${email}" -t satellite -m "${zen_amount}"
-            return $? ;;
-        *parrainage*gpu*|*module-gpu*|*constellation*|*love-box-deluxe*|*love-box*gpu*)
-            ${ASTROPORT}/UPLANET.official.sh -s "${email}" -t constellation -m "${zen_amount}"
-            return $? ;;
-        *infrastructure*|*labo*|*genereux-donateur*|*r-d*|*recherche*)
-            ## Dons fléchés vers le MULTIPASS du Capitaine (labo / R&D qo-op)
-            local cap="${CAPTAIN_TARGET:-support@qo-op.com}"
-            [[ "$JSON_OUTPUT" == "false" ]] && echo "→ Tier labo/R&D : routage vers MULTIPASS capitaine ${cap}"
-            ${ASTROPORT}/UPLANET.official.sh -l "${cap}" -m "${zen_amount}"
-            return $? ;;
-        *)
-            ${ASTROPORT}/UPLANET.official.sh -l "${email}" -m "${zen_amount}"
-            return $? ;;
-    esac
+    if _tier_matches "$tier_slug" "$TIER_SLUG_SATELLITE"; then
+        ${ASTROPORT}/UPLANET.official.sh -s "${email}" -t satellite -m "${zen_amount}"
+        return $?
+    elif _tier_matches "$tier_slug" "$TIER_SLUG_CONSTELLATION"; then
+        ${ASTROPORT}/UPLANET.official.sh -s "${email}" -t constellation -m "${zen_amount}"
+        return $?
+    elif _tier_matches "$tier_slug" "$TIER_SLUG_LABO"; then
+        ## Dons fléchés vers le MULTIPASS du Capitaine (labo / R&D qo-op)
+        local cap="${CAPTAIN_TARGET:-support@qo-op.com}"
+        [[ "$JSON_OUTPUT" == "false" ]] && echo "→ Tier labo/R&D : routage vers MULTIPASS capitaine ${cap}"
+        ${ASTROPORT}/UPLANET.official.sh -l "${cap}" -m "${zen_amount}"
+        return $?
+    else
+        ${ASTROPORT}/UPLANET.official.sh -l "${email}" -m "${zen_amount}"
+        return $?
+    fi
 }
 
 _build_station_card_html() {
@@ -558,23 +716,22 @@ _send_multipass_invitation() {
 
     ## Sélection du template et objet selon le tier
     local template_file subject
-    case "$tier_slug" in
-        *parrainage*128*|*extension-128*|*satellite*|*love-box*claude*)
-            template_file="${MY_PATH}/templates/invitation_satellite.html"
-            subject="🌟 Bienvenue Parrain Satellite UPlanet — créez votre MULTIPASS" ;;
-        *parrainage*gpu*|*module-gpu*|*constellation*|*love-box*deluxe*|*love-box*gpu*)
-            template_file="${MY_PATH}/templates/invitation_constellation.html"
-            subject="✨ Bienvenue Parrain Constellation UPlanet — accès GPU & #BRO" ;;
-        *infrastructure*|*labo*|*genereux-donateur*|*r-d*|*recherche*)
-            template_file="${MY_PATH}/templates/notification_labo.html"
-            subject="🔬 Contribution Labo/R&D reçue — UPlanet" ;;
-        *membre-resident*|*cloud-usage*|*adhesion*)
-            template_file="${MY_PATH}/templates/invitation_locataire.html"
-            subject="🎫 Votre adhésion UPlanet — créez votre MULTIPASS" ;;
-        *)
-            template_file="${MY_PATH}/templates/invitation_multipass.html"
-            subject="Votre contribution UPlanet — créez votre MULTIPASS" ;;
-    esac
+    if _tier_matches "$tier_slug" "$TIER_SLUG_SATELLITE"; then
+        template_file="${MY_PATH}/templates/invitation_satellite.html"
+        subject="🌟 Bienvenue Parrain Satellite UPlanet — créez votre MULTIPASS"
+    elif _tier_matches "$tier_slug" "$TIER_SLUG_CONSTELLATION"; then
+        template_file="${MY_PATH}/templates/invitation_constellation.html"
+        subject="✨ Bienvenue Parrain Constellation UPlanet — accès GPU & #BRO"
+    elif _tier_matches "$tier_slug" "$TIER_SLUG_LABO"; then
+        template_file="${MY_PATH}/templates/notification_labo.html"
+        subject="🔬 Contribution Labo/R&D reçue — UPlanet"
+    elif _tier_matches "$tier_slug" "$TIER_SLUG_CLOUD"; then
+        template_file="${MY_PATH}/templates/invitation_locataire.html"
+        subject="🎫 Votre adhésion UPlanet — créez votre MULTIPASS"
+    else
+        template_file="${MY_PATH}/templates/invitation_multipass.html"
+        subject="Votre contribution UPlanet — créez votre MULTIPASS"
+    fi
     [[ ! -f "$template_file" ]] && template_file="${MY_PATH}/templates/invitation_multipass.html"
 
     local tmp_html
@@ -662,10 +819,7 @@ jq -r '
 
     ## Routage des tiers labo/R&D : l'email cible est le Capitaine, pas le donateur
     _effective_email="$email"
-    case "$tier_slug" in
-        *infrastructure*|*labo*|*genereux-donateur*|*r-d*|*recherche*)
-            _effective_email="${CAPTAIN_TARGET:-support@qo-op.com}" ;;
-    esac
+    _tier_matches "$tier_slug" "$TIER_SLUG_LABO" && _effective_email="${CAPTAIN_TARGET:-support@qo-op.com}"
 
     ## Vérification MULTIPASS : local d'abord, puis swarm
     if [[ ! -f "$HOME/.zen/game/nostr/${_effective_email}/G1PUBNOSTR" ]]; then
