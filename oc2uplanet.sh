@@ -64,6 +64,13 @@ _tier_matches() {
     return 1
 }
 
+## Solde Ẑen d'un wallet MULTIPASS (via G1check.sh, cache ~/.zen/tmp/coucou/*.COINS)
+_zen_balance() {
+    local g1pub="$1"
+    [[ -z "$g1pub" || ! -x "${ASTROPORT}/tools/G1check.sh" ]] && return
+    "${ASTROPORT}/tools/G1check.sh" "${g1pub}:ZEN" 2>/dev/null | tail -n 1
+}
+
 ## Station variables (CAPTAINEMAIL, uSPOT, myDOMAIN, myIPFS…)
 [[ -z "$myDOMAIN" && -f "${ASTROPORT}/tools/my.sh" ]] && source "${ASTROPORT}/tools/my.sh" 2>/dev/null
 
@@ -314,14 +321,16 @@ _sync_rows() {
         local _effective_email="$email"
         _tier_matches "$tier_slug" "$TIER_SLUG_LABO" && _effective_email="${CAPTAIN_TARGET:-support@qo-op.com}"
 
-        local mp_status="not_invited" mp_label="❌ non invité"
+        local mp_status="not_invited" mp_label="❌ non invité" mp_g1pub_file=""
         if [[ -f "$HOME/.zen/game/nostr/${_effective_email}/G1PUBNOSTR" ]]; then
             mp_status="local"; mp_label="✅ local"
+            mp_g1pub_file="$HOME/.zen/game/nostr/${_effective_email}/G1PUBNOSTR"
         else
             local _swarm_hit
             _swarm_hit=$(find ~/.zen/tmp/swarm -name "G1PUBNOSTR" 2>/dev/null | grep -F "/${_effective_email}/" | head -1)
             if [[ -n "$_swarm_hit" ]]; then
                 mp_status="swarm"; mp_label="✅ swarm"
+                mp_g1pub_file="$_swarm_hit"
             else
                 local last_invite
                 last_invite=$(grep -F "${_effective_email}:" "$INVITATION_LOG" 2>/dev/null | grep ":INVITED:" | tail -1 | awk -F: '{print $NF}')
@@ -329,6 +338,13 @@ _sync_rows() {
                     mp_status="invited"; mp_label="📧 invité $(date -d "@$last_invite" +%d/%m 2>/dev/null)"
                 fi
             fi
+        fi
+
+        local wallet_zen=""
+        if [[ -n "$mp_g1pub_file" ]]; then
+            local _g1pub
+            _g1pub=$(cat "$mp_g1pub_file" 2>/dev/null)
+            [[ -n "$_g1pub" ]] && wallet_zen=$(_zen_balance "$_g1pub")
         fi
 
         local tx_id="${raw_email}:${amount}:${created_at}"
@@ -346,8 +362,10 @@ _sync_rows() {
         jq -cn --arg email "$email" --arg amount "$amount" --arg tier "${tier_slug:-standard}" \
             --arg mp_status "$mp_status" --arg mp_label "$mp_label" \
             --arg emis_status "$emis_status" --arg emis_label "$emis_label" \
+            --arg wallet_zen "$wallet_zen" \
             '{email:$email, amount:($amount|tonumber), tier:$tier,
               multipass_status:$mp_status, multipass_label:$mp_label,
+              wallet_zen:(if $wallet_zen == "" then null else ($wallet_zen|tonumber) end),
               emission_status:$emis_status, emission_label:$emis_label}'
     done
 }
@@ -364,10 +382,10 @@ show_sync() {
 
     echo ""
     echo "=== Synchro €→Ẑen : ${OCSLUG} (mois courant) ==="
-    printf "%-25s | %-10s | %-25s | %-14s | %s\n" "Email" "Montant" "Tier" "MULTIPASS" "Émission"
-    echo "----------------------------------------------------------------------------------------------------"
-    echo "$rows" | jq -r '.[] | "\(.email):\(.amount)€:\(.tier):\(.multipass_label):\(.emission_label)"' | while IFS=: read -r email amount tier mp emis; do
-        printf "%-25.25s | %-10s | %-25.25s | %-14s | %s\n" "$email" "$amount" "$tier" "$mp" "$emis"
+    printf "%-25s | %-10s | %-25s | %-14s | %-10s | %s\n" "Email" "Montant" "Tier" "MULTIPASS" "Solde Ẑen" "Émission"
+    echo "----------------------------------------------------------------------------------------------------------------"
+    echo "$rows" | jq -r '.[] | "\(.email):\(.amount)€:\(.tier):\(.multipass_label):\(.wallet_zen // "-"):\(.emission_label)"' | while IFS=: read -r email amount tier mp zen emis; do
+        printf "%-25.25s | %-10s | %-25.25s | %-14s | %-10s | %s\n" "$email" "$amount" "$tier" "$mp" "$zen" "$emis"
     done
     echo ""
     local total ok fail pending
