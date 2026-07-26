@@ -33,13 +33,15 @@ historiques codés en dur (`_tier_matches()` dans le script).
 ```
 OC2UPlanet/
 ├── oc2uplanet.sh          ← Script principal (GraphQL OC → émission ẐEN)
+├── tx_fields.py           ← Extraction NUL-séparée des transactions (voir note bash `read` ci-dessous)
 ├── oc_expense_monitor.sh  ← Monitoring dépenses OC (flux REJECTED → REFUND)
 ├── microledger.me.sh      ← Publication IPFS + git du microledger
 ├── data/                  ← Données runtime (NON versionné)
 │   ├── backers.json           ← Cache liste des membres OC
-│   ├── tx.json                ← Transactions récupérées
-│   ├── current_month.credit.json  ← Crédits du mois courant
-│   ├── last_month.credit.json     ← Crédits du mois précédent
+│   ├── tx.json                ← Transactions récupérées (GraphQL, jusqu'à 1000)
+│   ├── current_month.credit.json  ← Crédits du mois courant (info/alerts/ranking)
+│   ├── last_month.credit.json     ← Crédits du mois précédent (info/alerts)
+│   ├── catchup.credit.json        ← Crédits des 12 derniers mois (source réelle de --sync/--status/--run)
 │   ├── yesterday.credit.json      ← Crédits du jour précédent
 │   ├── emission.log               ← Journal d'idempotence (format: email:montant:tier:ts:status)
 │   ├── expenses.json              ← Dépenses OC
@@ -77,25 +79,46 @@ Marqueur d'idempotence mensuel : `~/.zen/game/.oc2uplanet_monthly.done`
 ```bash
 cd ~/.zen/workspace/OC2UPlanet
 ./oc2uplanet.sh                # Vue synthétique (= --status), AUCUNE émission Ẑen
-./oc2uplanet.sh --sync         # Détail par compte : montant, tier, MULTIPASS, statut émission
-./oc2uplanet.sh --status       # Résumé du mois courant (totaux + synchro OK/FAIL/pending)
+./oc2uplanet.sh --sync         # Détail par compte (rattrapage 12 mois) : montant, tier, MULTIPASS, statut émission
+./oc2uplanet.sh --status       # Résumé du mois courant + synchro OK/FAIL/pending (12 mois)
 ./oc2uplanet.sh --scan         # Lister tous les backers et contributions
 ./oc2uplanet.sh --ranking      # Classement par contribution + statut actif
 ./oc2uplanet.sh --alerts       # Abonnements arrêtés ou modifiés
 ./oc2uplanet.sh --history      # 20 dernières transactions traitées
 ./oc2uplanet.sh --json         # Sortie JSON machine-readable (combinable avec les options ci-dessus)
 
-./oc2uplanet.sh --run          # Traite le mois courant et ÉMET les Ẑen (usage cron)
+./oc2uplanet.sh --run          # Traite le rattrapage 12 mois et ÉMET les Ẑen (usage cron)
 ./oc2uplanet.sh --manual       # Comme --run, en mode interactif validation/édition
 ```
 
+## Rattrapage des MULTIPASS créés tardivement
+
+`--sync`/`--status`/`--run` traitent désormais `data/catchup.credit.json` (12 derniers
+mois, pas seulement le mois courant) : un don OC dont le MULTIPASS n'a été créé que des
+semaines après l'inscription est ainsi automatiquement rattrapé au run suivant, sans
+jamais rejouer un don déjà émis (idempotence). La fenêtre est volontairement bornée à un
+an : au-delà, le traitement d'un don ancien doit être validé manuellement, car son
+éventuelle compensation par un autre canal (hors pipeline) ne peut pas être vérifiée
+automatiquement.
+
 ## Idempotence
 
-Chaque transaction est enregistrée dans `data/emission.log` au format :
+Chaque transaction traitée publie une preuve NOSTR **kind 30851** (d-tag
+`oc-emission-<email>:<montant>:<created_at>`) et une ligne dans `data/emission.log` :
 ```
 email:montant:tier:timestamp:status
 ```
-`status` = `OK` si émis, évite les doubles émissions en cas de re-run.
+`status` = `OK` si émis. `_check_emission_nostr()` vérifie kind 30851 (source de vérité,
+persistant) puis `emission.log` (fallback local, purgé après 90 jours) avant tout
+traitement — évite les doubles émissions en cas de re-run.
+
+**Extraction des champs (`tx_fields.py`)** : les transactions sont parsées en Python
+(séparateur NUL) plutôt qu'en `jq @tsv` + `read` bash. Raison : `IFS=$'\t'` fait
+collapser silencieusement les champs vides consécutifs par le `read` de bash (tabulation
+= caractère "whitespace" pour bash), ce qui décale tous les champs suivants dès qu'une
+transaction n'a pas d'email visible (compte OC anonyme "incognito-*", transaction de
+projet enfant). NUL ne pouvant jamais apparaître dans une chaîne JSON, `readarray -d ''`
+est fiable à 100 % — vérifié empiriquement sur l'historique réel du collectif.
 
 ## Webhook temps réel (optionnel)
 

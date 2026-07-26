@@ -14,13 +14,24 @@
     </p>
   </div>
 
+  <!-- ALPHA -->
+  <div style="background:rgba(0,245,255,0.05);border:1px dashed rgba(0,245,255,0.3);padding:14px 18px;margin-bottom:24px;border-radius:4px;">
+    <p style="margin:0;color:rgba(255,255,255,0.6);font-size:0.78rem;line-height:1.6;">
+      🧪&nbsp;<strong style="color:#00f5ff;">UPlanet ORIGIN — phase alpha.</strong>
+      Votre MULTIPASS et son solde Ẑen seront automatiquement transférés vers
+      <strong style="color:#00ff88;">UPlanet Ẑen</strong> (1&nbsp;Ẑen&nbsp;=&nbsp;1&nbsp;€) lors du
+      lancement officiel de la constellation de stations Astroport.ONE.
+    </p>
+  </div>
+
   <!-- MERCI ADHÉRENT -->
   <div style="background:rgba(0,255,136,0.06);border-left:3px solid #00ff88;padding:18px 20px;margin-bottom:24px;border-radius:0 4px 4px 0;">
     <h2 style="font-family:'Courier New',monospace;color:#00ff88;font-size:1rem;letter-spacing:2px;margin:0 0 10px;">
       ✅ ADHÉSION REÇUE — MERCI !
     </h2>
     <p style="margin:0;color:rgba(255,255,255,0.75);font-size:0.9rem;line-height:1.75;">
-      Votre contribution de <strong style="color:#fff;">{{AMOUNT}}&nbsp;€</strong>
+      Votre contribution de <strong style="color:#fff;">{{AMOUNT}}&nbsp;€</strong> du
+      <strong style="color:#00f5ff;">{{DATE}}</strong>
       (offre&nbsp;: <em style="color:#00f5ff;">{{TIER_SLUG}}</em>) est bien enregistrée.<br>
       Elle correspond à <strong style="color:#00ff88;">{{AMOUNT}} Ẑ</strong> à créditer
       sur votre MULTIPASS UPlanet — <strong>1 Ẑ = 1 like</strong> dans tout l'écosystème.
@@ -109,6 +120,7 @@
     </p>
   </div>
 
+  {{RENEWAL_NOTICE}}
   {{STATION_CARD}}
 
   <!-- BIEN COMMUN + FEEDBACK -->

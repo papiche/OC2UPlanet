@@ -46,6 +46,13 @@ if [[ -z "${OCAPIKEY}" && -f "${COOP_CONFIG}" ]]; then
     [[ -z "${TIER_SLUG_CONSTELLATION}" ]] && TIER_SLUG_CONSTELLATION=$(coop_config_get "TIER_SLUG_CONSTELLATION" 2>/dev/null)
     [[ -z "${TIER_SLUG_LABO}" ]] && TIER_SLUG_LABO=$(coop_config_get "TIER_SLUG_LABO" 2>/dev/null)
     [[ -z "${TIER_SLUG_CLOUD}" ]] && TIER_SLUG_CLOUD=$(coop_config_get "TIER_SLUG_CLOUD" 2>/dev/null)
+
+    ## URLs de contribution OC par tier — utilisées dans le lien "reprendre votre cotisation"
+    ## de la relance envoyée aux abonnés arrêtés (cf. _build_renewal_notice_html).
+    [[ -z "${OC_URL_SATELLITE}" ]] && OC_URL_SATELLITE=$(coop_config_get "OC_URL_SATELLITE" 2>/dev/null)
+    [[ -z "${OC_URL_CONSTELLATION}" ]] && OC_URL_CONSTELLATION=$(coop_config_get "OC_URL_CONSTELLATION" 2>/dev/null)
+    [[ -z "${OC_URL_CLOUD}" ]] && OC_URL_CLOUD=$(coop_config_get "OC_URL_CLOUD" 2>/dev/null)
+    [[ -z "${OC_URL_MEMBRE}" ]] && OC_URL_MEMBRE=$(coop_config_get "OC_URL_MEMBRE" 2>/dev/null)
 fi
 [[ -z "${OC_API}" ]] && OC_API="https://api.opencollective.com/graphql/v2"
 
@@ -54,6 +61,11 @@ fi
 [[ -z "${TIER_SLUG_CONSTELLATION}" ]] && TIER_SLUG_CONSTELLATION="*parrainage*gpu*,*module-gpu*,*constellation*,*love-box*deluxe*,*love-box*gpu*"
 [[ -z "${TIER_SLUG_LABO}" ]] && TIER_SLUG_LABO="*infrastructure*,*labo*,*genereux-donateur*,*r-d*,*recherche*"
 [[ -z "${TIER_SLUG_CLOUD}" ]] && TIER_SLUG_CLOUD="*membre-resident*,*cloud-usage*,*adhesion*"
+
+[[ -z "${OC_URL_SATELLITE}" ]] && OC_URL_SATELLITE="https://opencollective.com/monnaie-libre/contribute/parrainage-infrastructure-extension-128-go-98386"
+[[ -z "${OC_URL_CONSTELLATION}" ]] && OC_URL_CONSTELLATION="https://opencollective.com/monnaie-libre/contribute/parrainage-infrastructure-module-gpu-1-24-98385"
+[[ -z "${OC_URL_CLOUD}" ]] && OC_URL_CLOUD="https://opencollective.com/monnaie-libre/projects/coeurbox/contribute/cotisation-services-cloud-usage-98388"
+[[ -z "${OC_URL_MEMBRE}" ]] && OC_URL_MEMBRE="https://opencollective.com/monnaie-libre/projects/coeurbox/contribute/membre-resident-soutien-mensuel-98389"
 
 ## Teste si $1 (tier_slug) correspond à l'une des globs de la liste $2 (séparées par des virgules)
 _tier_matches() {
@@ -85,25 +97,30 @@ show_help() {
     echo "Sans option : affiche une vue synthétique (comme --status). AUCUNE émission Ẑen."
     echo ""
     echo "Options en lecture seule (aucune émission Ẑen) :"
-    echo "  --sync      Détail par compte : montant, tier, MULTIPASS, statut émission Ẑen"
-    echo "  --status    Résumé du mois courant (totaux + synchro OK/FAIL/pending) [= défaut]"
+    echo "  --sync      Détail par compte (fenêtre de rattrapage 12 mois) : montant, tier, MULTIPASS, statut émission"
+    echo "  --status    Résumé du mois courant + synchro OK/FAIL/pending sur 12 mois [= défaut]"
     echo "  --scan      List all backers and their contributions"
     echo "  --ranking   Rank backers by total contribution + active status"
     echo "  --alerts    Identify stopped or changed subscriptions"
     echo "  --history   Show the last processed transactions"
     echo ""
     echo "Options d'exécution (ÉMETTENT des Ẑen) :"
-    echo "  --run       Traite le mois courant et émet les Ẑen correspondants (usage cron)"
+    echo "  --run       Traite la fenêtre de rattrapage (12 derniers mois) et émet les Ẑen (usage cron)"
     echo "  --manual    Comme --run, en mode interactif validation/édition transaction par transaction"
     echo ""
     echo "  --json      Modify output format to JSON (peut être placé n'importe où)"
     echo "  --help      Show this help message"
     echo ""
+    echo "Rattrapage : --run/--sync/--status traitent les 12 derniers mois (pas seulement le mois"
+    echo "courant), pour rattraper les dons dont le MULTIPASS n'a été créé que bien après"
+    echo "l'inscription OC. L'idempotence (kind 30851 + emission.log) garantit qu'un don déjà"
+    echo "émis n'est jamais rejoué. Pour les dons plus anciens qu'un an, traiter manuellement."
+    echo ""
     echo "Exemples :"
     echo "  $0                     # vue synthétique, sans risque"
-    echo "  $0 --sync              # voir où en est chaque compte ce mois-ci"
+    echo "  $0 --sync              # voir où en est chaque compte (12 derniers mois)"
     echo "  $0 --json --sync       # idem, en JSON"
-    echo "  $0 --run               # déclenche réellement l'émission Ẑen du mois"
+    echo "  $0 --run               # déclenche réellement l'émission Ẑen (12 derniers mois)"
     echo ""
 }
 
@@ -139,27 +156,33 @@ show_status() {
         processed="${processed:-0}"
     fi
 
-    ## Détail mois courant : statut réel par compte (émission Ẑen + MULTIPASS)
-    local rows ok fail pending mp_missing
+    ## Synchro sur la fenêtre de rattrapage (catchup.credit.json, 12 derniers mois) : statut réel par compte
+    ## (émission Ẑen + MULTIPASS), y compris les dons anciens en attente de rattrapage.
+    local rows ok fail pending mp_missing pending_active pending_stopped
     rows=$(_sync_rows | jq -s .)
     ok=$(echo "$rows" | jq '[.[] | select(.emission_status=="ok")] | length')
     fail=$(echo "$rows" | jq '[.[] | select(.emission_status=="fail")] | length')
     pending=$(echo "$rows" | jq '[.[] | select(.emission_status=="pending")] | length')
     mp_missing=$(echo "$rows" | jq '[.[] | select(.multipass_status!="local" and .multipass_status!="swarm")] | length')
+    pending_active=$(echo "$rows" | jq '[.[] | select(.emission_status=="pending" and .subscriber_status=="active")] | length')
+    pending_stopped=$(echo "$rows" | jq '[.[] | select(.emission_status=="pending" and .subscriber_status=="stopped")] | length')
 
     if [[ "$JSON_OUTPUT" == "true" ]]; then
         jq -n --arg tb "$total_backers" --arg cnt "$count" --arg ta "$total_amount" --arg pr "$processed" \
             --arg ok "$ok" --arg fail "$fail" --arg pending "$pending" --arg mp_missing "$mp_missing" \
+            --arg pa "$pending_active" --arg ps "$pending_stopped" \
             '{total_backers: $tb, current_month_tx: $cnt, current_month_total: $ta, processed_ok: $pr,
-              current_month_sync: {ok: $ok, fail: $fail, pending: $pending, multipass_missing: $mp_missing}}'
+              sync_status: {ok: $ok, fail: $fail, pending: $pending, multipass_missing: $mp_missing,
+                            pending_active_subscribers: $pa, pending_stopped_subscribers: $ps}}'
     else
         echo "=== Current Status ==="
         echo "Total Backers: $total_backers"
         echo "Current Month Transactions: $count"
         echo "Current Month Total: $total_amount EUR"
         echo "Total Transactions Processed (OK): $processed"
-        echo "--- Synchro €→Ẑen (mois courant) ---"
+        echo "--- Synchro €→Ẑen (rattrapage 12 derniers mois) ---"
         echo "✅ Émis: $ok | ❌ Échec: $fail | ⏳ En attente: $pending | MULTIPASS manquant: $mp_missing"
+        echo "   dont en attente : 🟢 $pending_active abonné(s) actif(s) ce mois-ci | 🔴 $pending_stopped abonné(s) arrêté(s)"
         [[ "$pending" -gt 0 || "$fail" -gt 0 || "$mp_missing" -gt 0 ]] && echo "→ Détail : ./oc2uplanet.sh --sync"
     fi
 }
@@ -190,9 +213,20 @@ fetch_oc_data() {
     local start_of_month=$(date -d "$(date +%Y-%m-01)" +"%Y-%m-%d")
     local start_of_last_month=$(date -d "$(date +%Y-%m-01) -1 month" +"%Y-%m-%d")
     local end_of_last_month=$(date -d "$(date +%Y-%m-01) -1 day" +"%Y-%m-%d")
+    local start_of_catchup=$(date -d "1 year ago" +"%Y-%m-%d")
 
     jq -c --arg som "$start_of_month" '.data.account.transactions.nodes[] | select(.type == "CREDIT" and .createdAt >= $som)' ${MY_PATH}/data/tx.json > ${MY_PATH}/data/current_month.credit.json
     jq -c --arg solm "$start_of_last_month" --arg eolm "$end_of_last_month" '.data.account.transactions.nodes[] | select(.type == "CREDIT" and (.createdAt >= $solm and .createdAt <= $eolm))' ${MY_PATH}/data/tx.json > ${MY_PATH}/data/last_month.credit.json
+
+    ## Fenêtre de rattrapage (12 derniers mois, PAS tout l'historique) — sert au
+    ## traitement/synchro réels. Contrairement à current_month.credit.json (info
+    ## mensuelle), ce fichier permet de rattraper les dons dont le MULTIPASS n'a été
+    ## créé que bien après l'inscription OC : l'idempotence (_check_emission_nostr /
+    ## kind 30851) garantit qu'un don déjà émis n'est jamais rejoué. La fenêtre est
+    ## volontairement bornée à 1 an (et non tout l'historique depuis la création du
+    ## collectif) pour laisser un contrôle humain sur les dons plus anciens, dont le
+    ## traitement éventuel (hors pipeline) ne peut pas être vérifié automatiquement.
+    jq -c --arg soc "$start_of_catchup" '.data.account.transactions.nodes[] | select(.type == "CREDIT" and .createdAt >= $soc)' ${MY_PATH}/data/tx.json > ${MY_PATH}/data/catchup.credit.json
 }
 
 show_scan() {
@@ -301,19 +335,33 @@ show_alerts() {
     fi
 }
 
-## Croise current_month.credit.json avec l'état réel de chaque compte :
-## présence MULTIPASS (local/swarm/invité/absent) + statut émission Ẑen (OK/FAIL/pending).
-## Émet un objet JSON par ligne (à consommer avec `jq -s .`).
+## Croise catchup.credit.json (rattrapage 12 derniers mois) avec l'état réel de
+## chaque compte : présence MULTIPASS (local/swarm/invité/absent) + statut émission
+## Ẑen (OK/FAIL/pending). Émet un objet JSON par ligne (à consommer avec `jq -s .`).
 _sync_rows() {
-    jq -r '
-        [
-            (.fromAccount.slug // ""),
-            (.fromAccount.emails[0] // ""),
-            (.amount.value // 0 | tostring),
-            (.createdAt // ""),
-            (.order.tier.slug // "")
-        ] | @tsv
-    ' "${MY_PATH}/data/current_month.credit.json" 2>/dev/null | while IFS=$'\t' read -r slug raw_email amount created_at tier_slug; do
+    ## Extraction via tx_fields.py (NUL-separe) plutot que jq @tsv + `read` :
+    ## bash `read` avec IFS=tab collabe silencieusement les champs vides consecutifs
+    ## (ex: email manquant pour un compte OC anonyme), decalant tous les champs
+    ## suivants -- verifie empiriquement sur les comptes "incognito-*" et les
+    ## transactions de projets enfants (emails: null). NUL ne peut jamais apparaitre
+    ## dans une chaine JSON, donc `readarray -d ''` est fiable a 100%.
+    local -a _fields
+    readarray -d '' -t _fields < <(python3 "${MY_PATH}/tx_fields.py" "${MY_PATH}/data/catchup.credit.json" 2>/dev/null)
+
+    ## Comptes ayant contribué CE mois-ci (cotisation en cours) — sert à distinguer
+    ## les dons en attente d'un abonné toujours actif de ceux d'un abonné qui a arrêté.
+    local -A _active_slugs=()
+    local _s
+    while IFS= read -r _s; do
+        [[ -n "$_s" ]] && _active_slugs["$_s"]=1
+    done < <(jq -r '.fromAccount.slug' "${MY_PATH}/data/current_month.credit.json" 2>/dev/null | sort -u)
+
+    local _i
+    for ((_i = 0; _i < ${#_fields[@]}; _i += 6)); do
+        local slug="${_fields[_i]}" raw_email="${_fields[_i+1]}" amount="${_fields[_i+2]}" \
+              created_at="${_fields[_i+3]}" tier_slug="${_fields[_i+4]}"
+        local sub_status="stopped" sub_label="🔴 arrêté"
+        [[ -n "${_active_slugs[$slug]:-}" ]] && sub_status="active" && sub_label="🟢 actif"
         local email="$raw_email"
         [[ -z "$email" || "$email" == "null" ]] && email=$(jq -r --arg s "$slug" '.[$s] // empty' "${MY_PATH}/data/slug_email_map.json" 2>/dev/null)
         [[ -z "$email" || "$email" == "null" ]] && email="$slug"
@@ -363,9 +411,11 @@ _sync_rows() {
             --arg mp_status "$mp_status" --arg mp_label "$mp_label" \
             --arg emis_status "$emis_status" --arg emis_label "$emis_label" \
             --arg wallet_zen "$wallet_zen" \
+            --arg sub_status "$sub_status" --arg sub_label "$sub_label" \
             '{email:$email, amount:($amount|tonumber), tier:$tier,
               multipass_status:$mp_status, multipass_label:$mp_label,
               wallet_zen:(if $wallet_zen == "" then null else ($wallet_zen|tonumber) end),
+              subscriber_status:$sub_status, subscriber_label:$sub_label,
               emission_status:$emis_status, emission_label:$emis_label}'
     done
 }
@@ -381,19 +431,23 @@ show_sync() {
     fi
 
     echo ""
-    echo "=== Synchro €→Ẑen : ${OCSLUG} (mois courant) ==="
-    printf "%-25s | %-10s | %-25s | %-14s | %-10s | %s\n" "Email" "Montant" "Tier" "MULTIPASS" "Solde Ẑen" "Émission"
-    echo "----------------------------------------------------------------------------------------------------------------"
-    echo "$rows" | jq -r '.[] | "\(.email):\(.amount)€:\(.tier):\(.multipass_label):\(.wallet_zen // "-"):\(.emission_label)"' | while IFS=: read -r email amount tier mp zen emis; do
-        printf "%-25.25s | %-10s | %-25.25s | %-14s | %-10s | %s\n" "$email" "$amount" "$tier" "$mp" "$zen" "$emis"
+    echo "=== Synchro €→Ẑen : ${OCSLUG} (rattrapage 12 derniers mois) ==="
+    printf "%-25s | %-10s | %-25s | %-10s | %-14s | %-10s | %s\n" "Email" "Montant" "Tier" "Abonnement" "MULTIPASS" "Solde Ẑen" "Émission"
+    echo "----------------------------------------------------------------------------------------------------------------------------"
+    ## Seules les lignes non soldées sont affichées (pending/fail) — les dons déjà émis
+    ## (✅ OK) sont comptabilisés dans le total mais masqués pour éviter un mur de lignes.
+    echo "$rows" | jq -r '.[] | select(.emission_status != "ok") | "\(.email):\(.amount)€:\(.tier):\(.subscriber_label):\(.multipass_label):\(.wallet_zen // "-"):\(.emission_label)"' | while IFS=: read -r email amount tier sub mp zen emis; do
+        printf "%-25.25s | %-10s | %-25.25s | %-10s | %-14s | %-10s | %s\n" "$email" "$amount" "$tier" "$sub" "$mp" "$zen" "$emis"
     done
     echo ""
-    local total ok fail pending
+    local total ok fail pending pending_active pending_stopped
     total=$(echo "$rows" | jq 'length')
     ok=$(echo "$rows" | jq '[.[] | select(.emission_status=="ok")] | length')
     fail=$(echo "$rows" | jq '[.[] | select(.emission_status=="fail")] | length')
     pending=$(echo "$rows" | jq '[.[] | select(.emission_status=="pending")] | length')
-    echo "Total: $total | ✅ Émis: $ok | ❌ Échec: $fail | ⏳ En attente: $pending"
+    pending_active=$(echo "$rows" | jq '[.[] | select(.emission_status=="pending" and .subscriber_status=="active")] | length')
+    pending_stopped=$(echo "$rows" | jq '[.[] | select(.emission_status=="pending" and .subscriber_status=="stopped")] | length')
+    echo "Total: $total | ✅ Émis: $ok (masqués ci-dessus) | ❌ Échec: $fail | ⏳ En attente: $pending (🟢 actifs: $pending_active | 🔴 arrêtés: $pending_stopped)"
 }
 
 ## Argument parsing
@@ -676,8 +730,42 @@ _build_station_card_html() {
 STATION_HTML
 }
 
+## Bloc HTML "reprenez votre cotisation", injecté via {{RENEWAL_NOTICE}} quand le
+## donateur ne cotise plus ce mois-ci (abonnement arrêté). Vide (rien injecté) si
+## l'abonnement est toujours actif.
+_build_renewal_notice_html() {
+    local sub_status="$1" tier_slug="$2"
+    [[ "$sub_status" != "stopped" ]] && return 0
+
+    local resume_url="https://opencollective.com/monnaie-libre/contribute"
+    if _tier_matches "$tier_slug" "$TIER_SLUG_SATELLITE"; then
+        resume_url="${OC_URL_SATELLITE:-$resume_url}"
+    elif _tier_matches "$tier_slug" "$TIER_SLUG_CONSTELLATION"; then
+        resume_url="${OC_URL_CONSTELLATION:-$resume_url}"
+    elif _tier_matches "$tier_slug" "$TIER_SLUG_CLOUD"; then
+        resume_url="${OC_URL_CLOUD:-$resume_url}"
+    fi
+
+    cat << RENEWAL_HTML
+
+  <!-- RELANCE ABONNEMENT -->
+  <div style="background:rgba(255,165,0,0.08);border-left:3px solid #ffa500;padding:16px 20px;margin-bottom:24px;border-radius:0 4px 4px 0;">
+    <h2 style="font-family:'Courier New',monospace;color:#ffa500;font-size:0.85rem;letter-spacing:2px;margin:0 0 8px;">
+      ⏸️&nbsp;COTISATION EN PAUSE
+    </h2>
+    <p style="margin:0;color:rgba(255,255,255,0.75);font-size:0.85rem;line-height:1.65;">
+      Ce don ne correspond à aucune cotisation ce mois-ci — votre abonnement semble
+      s'être arrêté depuis. Pour continuer à faire vivre la coopérative et rester à
+      jour, vous pouvez
+      <a href="${resume_url}" style="color:#ffa500;font-weight:600;">reprendre votre cotisation ici</a>.
+    </p>
+  </div>
+
+RENEWAL_HTML
+}
+
 _send_multipass_invitation() {
-    local email="$1" amount="$2" tier_slug="$3" donor_email="${4:-$1}"
+    local email="$1" amount="$2" tier_slug="$3" donor_email="${4:-$1}" created_at="${5:-}" sub_status="${6:-active}"
 
     ## Opt-out Mailjet : vérifier ~/.zen/game/nostr/$email/.mailjet
     local mailjet_optout="${HOME}/.zen/game/nostr/${email}/.mailjet"
@@ -755,12 +843,18 @@ _send_multipass_invitation() {
     local tmp_html
     tmp_html=$(mktemp /tmp/oc_invitation_XXXXXX.html)
 
+    ## Date lisible du don (peut dater de plusieurs mois — fenêtre de rattrapage 12 mois)
+    local human_date
+    human_date=$(date -d "$created_at" +"%d/%m/%Y" 2>/dev/null)
+    [[ -z "$human_date" ]] && human_date="récemment"
+
     if [[ -f "$template_file" ]]; then
         sed \
             -e "s|{{EMAIL}}|${email}|g" \
             -e "s|{{DONOR_EMAIL}}|${donor_email}|g" \
             -e "s|{{AMOUNT}}|${amount}|g" \
             -e "s|{{TIER_SLUG}}|${tier_slug:-standard}|g" \
+            -e "s|{{DATE}}|${human_date}|g" \
             -e "s|{{STATION_URL}}|${station_url}|g" \
             -e "s|{{PROFILE_URL}}|${profile_url}|g" \
             -e "s|{{CAPTAIN_EMAIL}}|${CAPTAIN_TARGET:-support@qo-op.com}|g" \
@@ -779,18 +873,22 @@ _send_multipass_invitation() {
 HTMLEOF
     fi
 
-    ## Injecter la fiche station (substitution multi-ligne via Python)
-    local _card_tmpfile
+    ## Injecter la fiche station + la relance abonnement (substitution multi-ligne via Python)
+    local _card_tmpfile _renewal_tmpfile
     _card_tmpfile=$(mktemp /tmp/station_card_XXXXXX.html)
+    _renewal_tmpfile=$(mktemp /tmp/renewal_notice_XXXXXX.html)
     _build_station_card_html > "$_card_tmpfile"
-    python3 - "$_card_tmpfile" "$tmp_html" << 'PYEOF' 2>/dev/null || \
-        sed -i 's/{{STATION_CARD}}//' "$tmp_html"
+    _build_renewal_notice_html "$sub_status" "$tier_slug" > "$_renewal_tmpfile"
+    python3 - "$_card_tmpfile" "$_renewal_tmpfile" "$tmp_html" << 'PYEOF' 2>/dev/null || \
+        sed -i -e 's/{{STATION_CARD}}//' -e 's/{{RENEWAL_NOTICE}}//' "$tmp_html"
 import sys
 with open(sys.argv[1], encoding='utf-8') as f: card = f.read()
-with open(sys.argv[2], encoding='utf-8') as f: html = f.read()
-with open(sys.argv[2], 'w', encoding='utf-8') as f: f.write(html.replace('{{STATION_CARD}}', card))
+with open(sys.argv[2], encoding='utf-8') as f: renewal = f.read()
+with open(sys.argv[3], encoding='utf-8') as f: html = f.read()
+html = html.replace('{{STATION_CARD}}', card).replace('{{RENEWAL_NOTICE}}', renewal)
+with open(sys.argv[3], 'w', encoding='utf-8') as f: f.write(html)
 PYEOF
-    rm -f "$_card_tmpfile"
+    rm -f "$_card_tmpfile" "$_renewal_tmpfile"
 
     if [[ -x "${ASTROPORT}/tools/mailjet.sh" ]]; then
         "${ASTROPORT}/tools/mailjet.sh" \
@@ -813,17 +911,127 @@ PYEOF
     fi
 }
 
-[[ "$JSON_OUTPUT" == "false" ]] && echo "=== Processing current month credits ==="
-jq -r '
-    [
-        (.fromAccount.slug // ""),
-        (.fromAccount.emails[0] // ""),
-        (.amount.value // 0 | tostring),
-        (.createdAt // ""),
-        (.order.tier.slug // ""),
-        (.toAccount.slug // "")
-    ] | @tsv
-' "${MY_PATH}/data/current_month.credit.json" 2>/dev/null | while IFS=$'\t' read -r slug raw_email amount created_at tier_slug to_project; do
+## Relance dédiée aux abonnés dont le MULTIPASS existe déjà mais qui ne cotisent plus
+## ce mois-ci (cf. subscriber_status "stopped") — distinct de _send_multipass_invitation
+## (qui s'adresse à ceux qui n'ont pas encore de MULTIPASS).
+_send_renewal_reminder() {
+    local email="$1" tier_slug="$2" last_amount="$3" last_created_at="$4"
+
+    local mailjet_optout="${HOME}/.zen/game/nostr/${email}/.mailjet"
+    if [[ -f "$mailjet_optout" ]]; then
+        local _ch
+        _ch=$(jq -r '.channels[]?' "$mailjet_optout" 2>/dev/null)
+        if echo "$_ch" | grep -qE '^(email|all)$'; then
+            return 0
+        fi
+    fi
+
+    local is_primary=false
+    local strapfile="${HOME}/.zen/game/MY_boostrap_nodes.txt"
+    [[ ! -f "$strapfile" ]] && strapfile="${HOME}/.zen/Astroport.ONE/A_boostrap_nodes.txt"
+    if [[ -f "$strapfile" ]]; then
+        local primary_strap
+        primary_strap=$(grep -Ev '#' "$strapfile" | rev | cut -d '/' -f 1 | rev | grep -v '^[[:space:]]*$' | head -n 1)
+        [[ "$IPFSNODEID" == "$primary_strap" ]] && is_primary=true
+    fi
+    [[ "$is_primary" == "false" ]] && return 0
+
+    ## Idempotence : une relance au plus tous les 30 jours (abonnement mensuel — pas
+    ## besoin d'insister comme pour l'invitation MULTIPASS, marqueur distinct "REMINDED"
+    ## dans le même log pour réutiliser l'infrastructure existante).
+    local now last_ts
+    now=$(date +%s)
+    last_ts=$(grep -F "${email}:" "$INVITATION_LOG" | grep ":REMINDED:" | grep -oE ':[0-9]{10}$' | tail -1 | tr -d ':')
+    if [[ -n "$last_ts" ]] && (( now - last_ts < 2592000 )); then
+        return 0
+    fi
+
+    local resume_url="https://opencollective.com/monnaie-libre/contribute"
+    if _tier_matches "$tier_slug" "$TIER_SLUG_SATELLITE"; then
+        resume_url="${OC_URL_SATELLITE:-$resume_url}"
+    elif _tier_matches "$tier_slug" "$TIER_SLUG_CONSTELLATION"; then
+        resume_url="${OC_URL_CONSTELLATION:-$resume_url}"
+    elif _tier_matches "$tier_slug" "$TIER_SLUG_CLOUD"; then
+        resume_url="${OC_URL_CLOUD:-$resume_url}"
+    fi
+
+    local human_date
+    human_date=$(date -d "$last_created_at" +"%d/%m/%Y" 2>/dev/null)
+    [[ -z "$human_date" ]] && human_date="récemment"
+
+    local station_url
+    if [[ -n "$uSPOT" ]]; then
+        station_url="$uSPOT"
+    else
+        station_url="https://u.copylaradio.com"
+    fi
+
+    ## Code PASS (PIN 5 chiffres, créé par make_NOSTRCARD.sh) — permet de récupérer
+    ## le MULTIPASS existant depuis Zelkova (email + PASS → UPassport /g1nostr) sans
+    ## ressaisir de clés. N'existe que si le MULTIPASS est local (garanti par l'appelant :
+    ## _send_renewal_reminder n'est invoqué qu'après confirmation que G1PUBNOSTR est local).
+    local pass_code
+    pass_code=$(cat "${HOME}/.zen/game/nostr/${email}/.pass" 2>/dev/null)
+
+    local template_file="${MY_PATH}/templates/reminder_resume.html"
+    local tmp_html
+    tmp_html=$(mktemp /tmp/oc_reminder_XXXXXX.html)
+
+    if [[ -f "$template_file" ]]; then
+        sed \
+            -e "s|{{EMAIL}}|${email}|g" \
+            -e "s|{{AMOUNT}}|${last_amount}|g" \
+            -e "s|{{TIER_SLUG}}|${tier_slug:-standard}|g" \
+            -e "s|{{DATE}}|${human_date}|g" \
+            -e "s|{{RESUME_URL}}|${resume_url}|g" \
+            -e "s|{{STATION_URL}}|${station_url}|g" \
+            -e "s|{{UNSUB_URL}}|${station_url}|g" \
+            -e "s|{{PASS_CODE}}|${pass_code:-????}|g" \
+            -e "s|{{CAPTAIN_EMAIL}}|${CAPTAIN_TARGET:-support@qo-op.com}|g" \
+            -e "s|{{UPLANETNAME}}|${UPLANETNAME:0:8}|g" \
+            "$template_file" > "$tmp_html"
+    else
+        rm -f "$tmp_html"
+        return 1
+    fi
+
+    if [[ -x "${ASTROPORT}/tools/mailjet.sh" ]]; then
+        "${ASTROPORT}/tools/mailjet.sh" \
+            --template "$0" \
+            --expire 7d \
+            "${email}" \
+            "${tmp_html}" \
+            "🔄 Votre cotisation UPlanet s'est arrêtée — la reprendre ?"
+        local rc=$?
+        rm -f "$tmp_html"
+        if [[ $rc -eq 0 ]]; then
+            echo "${email}:${last_amount}:REMINDED:$(date +%s)" >> "$INVITATION_LOG"
+            [[ "$JSON_OUTPUT" == "false" ]] && echo "📧 Relance abonnement envoyée à ${email}"
+        else
+            [[ "$JSON_OUTPUT" == "false" ]] && echo "⚠️  Échec envoi relance à ${email} (mailjet rc=$rc)"
+        fi
+    else
+        rm -f "$tmp_html"
+    fi
+}
+
+[[ "$JSON_OUTPUT" == "false" ]] && echo "=== Processing 12-month catch-up window (MULTIPASS tardifs inclus) ==="
+## Extraction via tx_fields.py (NUL-séparé) — voir _sync_rows() pour le détail du bug
+## `read`+IFS=tab évité (champs vides d'un compte OC anonyme décalant toute la ligne).
+declare -a _fields
+readarray -d '' -t _fields < <(python3 "${MY_PATH}/tx_fields.py" "${MY_PATH}/data/catchup.credit.json" 2>/dev/null)
+
+## Comptes ayant contribué CE mois-ci — voir _sync_rows() pour le détail.
+declare -A _active_slugs=()
+while IFS= read -r _s; do
+    [[ -n "$_s" ]] && _active_slugs["$_s"]=1
+done < <(jq -r '.fromAccount.slug' "${MY_PATH}/data/current_month.credit.json" 2>/dev/null | sort -u)
+
+for ((_i = 0; _i < ${#_fields[@]}; _i += 6)); do
+    slug="${_fields[_i]}"; raw_email="${_fields[_i+1]}"; amount="${_fields[_i+2]}"
+    created_at="${_fields[_i+3]}"; tier_slug="${_fields[_i+4]}"; to_project="${_fields[_i+5]}"
+    sub_status="stopped"
+    [[ -n "${_active_slugs[$slug]:-}" ]] && sub_status="active"
 
     email="$raw_email"
     [[ -z "$email" || "$email" == "null" ]] && email=$(jq -r --arg s "$slug" '.[$s] // empty' "${MY_PATH}/data/slug_email_map.json" 2>/dev/null)
@@ -844,11 +1052,18 @@ jq -r '
         _swarm_hit=$(find ~/.zen/tmp/swarm -name "G1PUBNOSTR" 2>/dev/null | grep -F "/${_effective_email}/" | head -1)
         if [[ -z "$_swarm_hit" ]]; then
             [[ "$JSON_OUTPUT" == "false" ]] && echo "⚠️  MULTIPASS introuvable pour ${_effective_email} — invitation en cours"
-            _send_multipass_invitation "${_effective_email}" "${amount}" "${tier_slug}" "${email}"
+            _send_multipass_invitation "${_effective_email}" "${amount}" "${tier_slug}" "${email}" "${created_at}" "${sub_status}"
         else
             [[ "$JSON_OUTPUT" == "false" ]] && echo "ℹ️  MULTIPASS de ${_effective_email} présent dans le swarm (${_swarm_hit})"
         fi
         continue
+    fi
+
+    ## MULTIPASS déjà créé mais abonnement arrêté (ne cotise plus ce mois-ci) : relance
+    ## dédiée, distincte de l'invitation MULTIPASS ci-dessus. Ne concerne pas les tiers
+    ## labo/R&D (redirigés vers le Capitaine — la notion d'abonnement ne s'y applique pas).
+    if [[ "$sub_status" == "stopped" ]] && ! _tier_matches "$tier_slug" "$TIER_SLUG_LABO"; then
+        _send_renewal_reminder "${_effective_email}" "${tier_slug}" "${amount}" "${created_at}"
     fi
 
     if [[ "$MANUAL_MODE" == "true" ]]; then
