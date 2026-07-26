@@ -1068,7 +1068,12 @@ for ((_i = 0; _i < ${#_fields[@]}; _i += 6)); do
 
     if [[ "$MANUAL_MODE" == "true" ]]; then
         echo "------------------------------------------------"
-        echo "Transaction: $email | Amount: $amount EUR"
+        echo "Transaction: $email | Amount: $amount EUR | Tier: ${tier_slug:-standard}"
+        ## Tiers labo/R&D : le don ne recharge PAS le wallet du donateur mais celui du
+        ## Capitaine (cf. dispatch_zen_emission) — le préciser pour éviter toute confusion
+        ## avec un donateur dont le MULTIPASS personnel n'existe pas encore.
+        [[ "$_effective_email" != "$email" ]] && \
+            echo "   → Tier labo/R&D : redirigé vers le MULTIPASS Capitaine (${_effective_email})"
         read -p "Process? [Y/n/edit/skip/exit]: " choice
         case "${choice,,}" in
             y|yes|"") dispatch_zen_emission "${email}" "${amount}" "${tier_slug}" ;;
