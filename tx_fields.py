@@ -24,11 +24,20 @@ def main():
     path = sys.argv[1]
     out = sys.stdout.buffer
     with open(path, encoding="utf-8") as f:
-        for line in f:
+        for lineno, line in enumerate(f, start=1):
             line = line.strip()
             if not line:
                 continue
-            tx = json.loads(line)
+            try:
+                tx = json.loads(line)
+            except json.JSONDecodeError as e:
+                # Ne jamais planter sur une ligne malformee : ca tronquerait
+                # silencieusement toutes les transactions suivantes du fichier
+                # (readarray recevrait un ensemble partiel sans que rien ne le signale,
+                # cf. audit). On saute la ligne fautive et on continue les suivantes.
+                print(f"tx_fields.py: ligne {lineno} ignoree (JSON invalide: {e})",
+                      file=sys.stderr)
+                continue
             from_account = tx.get("fromAccount") or {}
             emails = from_account.get("emails") or []
             order = tx.get("order") or {}

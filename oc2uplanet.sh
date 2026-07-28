@@ -48,7 +48,7 @@ if [[ -z "${OCAPIKEY}" && -f "${COOP_CONFIG}" ]]; then
     [[ -z "${TIER_SLUG_CLOUD}" ]] && TIER_SLUG_CLOUD=$(coop_config_get "TIER_SLUG_CLOUD" 2>/dev/null)
 
     ## URLs de contribution OC par tier — utilisées dans le lien "reprendre votre cotisation"
-    ## de la relance envoyée aux abonnés arrêtés (cf. _build_renewal_notice_html).
+    ## de la relance envoyée aux abonnés arrêtés (cf. _send_renewal_reminder).
     [[ -z "${OC_URL_SATELLITE}" ]] && OC_URL_SATELLITE=$(coop_config_get "OC_URL_SATELLITE" 2>/dev/null)
     [[ -z "${OC_URL_CONSTELLATION}" ]] && OC_URL_CONSTELLATION=$(coop_config_get "OC_URL_CONSTELLATION" 2>/dev/null)
     [[ -z "${OC_URL_CLOUD}" ]] && OC_URL_CLOUD=$(coop_config_get "OC_URL_CLOUD" 2>/dev/null)
@@ -57,10 +57,13 @@ fi
 [[ -z "${OC_API}" ]] && OC_API="https://api.opencollective.com/graphql/v2"
 
 ## Repli sur les motifs historiques si la config coopérative n'expose pas encore ces clés
-[[ -z "${TIER_SLUG_SATELLITE}" ]] && TIER_SLUG_SATELLITE="*parrainage*128*,*extension-128*,*satellite*,*love-box*claude*"
-[[ -z "${TIER_SLUG_CONSTELLATION}" ]] && TIER_SLUG_CONSTELLATION="*parrainage*gpu*,*module-gpu*,*constellation*,*love-box*deluxe*,*love-box*gpu*"
-[[ -z "${TIER_SLUG_LABO}" ]] && TIER_SLUG_LABO="*infrastructure*,*labo*,*genereux-donateur*,*r-d*,*recherche*"
-[[ -z "${TIER_SLUG_CLOUD}" ]] && TIER_SLUG_CLOUD="*membre-resident*,*cloud-usage*,*adhesion*"
+## Motifs SANS `*` = ancrés comme segment entier par _tier_matches (voir sa doc) ;
+## seuls les motifs composés (deux mots-clés requis, ex. parrainage+128) gardent des
+## `*` explicites, car ils ont besoin du wildcard au milieu.
+[[ -z "${TIER_SLUG_SATELLITE}" ]] && TIER_SLUG_SATELLITE="*parrainage*128*,extension-128,satellite,*love-box*claude*"
+[[ -z "${TIER_SLUG_CONSTELLATION}" ]] && TIER_SLUG_CONSTELLATION="*parrainage*gpu*,module-gpu,constellation,*love-box*deluxe*,*love-box*gpu*"
+[[ -z "${TIER_SLUG_LABO}" ]] && TIER_SLUG_LABO="infrastructure,labo,genereux-donateur,r-d,recherche"
+[[ -z "${TIER_SLUG_CLOUD}" ]] && TIER_SLUG_CLOUD="membre-resident,cloud-usage,adhesion"
 
 [[ -z "${OC_URL_SATELLITE}" ]] && OC_URL_SATELLITE="https://opencollective.com/monnaie-libre/contribute/parrainage-infrastructure-extension-128-go-98386"
 [[ -z "${OC_URL_CONSTELLATION}" ]] && OC_URL_CONSTELLATION="https://opencollective.com/monnaie-libre/contribute/parrainage-infrastructure-module-gpu-1-24-98385"
@@ -68,10 +71,21 @@ fi
 [[ -z "${OC_URL_MEMBRE}" ]] && OC_URL_MEMBRE="https://opencollective.com/monnaie-libre/projects/coeurbox/contribute/membre-resident-soutien-mensuel-98389"
 
 ## Teste si $1 (tier_slug) correspond à l'une des globs de la liste $2 (séparées par des virgules)
+## Teste si $1 (tier_slug) correspond à l'une des entrées de la liste $2 (séparées
+## par des virgules). Une entrée contenant un `*` est utilisée telle quelle (glob
+## explicite, substring libre — pour les motifs composés type "*parrainage*128*").
+## Une entrée SANS `*` est ancrée comme un segment entier délimité par des tirets
+## (exactement le slug, ou en tête/fin/milieu entre deux tirets) — évite qu'un mot
+## nu comme "labo" ou "r-d" ne matche par accident une sous-chaîne d'un autre mot
+## (ex. "colLABOratif", "suppoRTer-Don" — vérifié empiriquement, cf. audit).
 _tier_matches() {
     local slug="$1" patterns="$2" IFS="," p
     for p in $patterns; do
-        [[ "$slug" == $p ]] && return 0
+        if [[ "$p" == *'*'* ]]; then
+            [[ "$slug" == $p ]] && return 0
+        else
+            [[ "$slug" == "$p" || "$slug" == "$p"-* || "$slug" == *-"$p" || "$slug" == *-"$p"-* ]] && return 0
+        fi
     done
     return 1
 }
@@ -158,7 +172,7 @@ show_status() {
 
     ## Synchro sur la fenêtre de rattrapage (catchup.credit.json, 12 derniers mois) : statut réel par compte
     ## (émission Ẑen + MULTIPASS), y compris les dons anciens en attente de rattrapage.
-    local rows ok fail pending mp_missing pending_active pending_stopped
+    local rows ok fail pending mp_missing pending_active pending_stopped blocked_no_email
     rows=$(_sync_rows | jq -s .)
     ok=$(echo "$rows" | jq '[.[] | select(.emission_status=="ok")] | length')
     fail=$(echo "$rows" | jq '[.[] | select(.emission_status=="fail")] | length')
@@ -166,14 +180,16 @@ show_status() {
     mp_missing=$(echo "$rows" | jq '[.[] | select(.multipass_status!="local" and .multipass_status!="swarm")] | length')
     pending_active=$(echo "$rows" | jq '[.[] | select(.emission_status=="pending" and .subscriber_status=="active")] | length')
     pending_stopped=$(echo "$rows" | jq '[.[] | select(.emission_status=="pending" and .subscriber_status=="stopped")] | length')
+    blocked_no_email=$(echo "$rows" | jq '[.[] | select(.multipass_status=="blocked")] | length')
 
     if [[ "$JSON_OUTPUT" == "true" ]]; then
         jq -n --arg tb "$total_backers" --arg cnt "$count" --arg ta "$total_amount" --arg pr "$processed" \
             --arg ok "$ok" --arg fail "$fail" --arg pending "$pending" --arg mp_missing "$mp_missing" \
-            --arg pa "$pending_active" --arg ps "$pending_stopped" \
+            --arg pa "$pending_active" --arg ps "$pending_stopped" --arg bne "$blocked_no_email" \
             '{total_backers: $tb, current_month_tx: $cnt, current_month_total: $ta, processed_ok: $pr,
               sync_status: {ok: $ok, fail: $fail, pending: $pending, multipass_missing: $mp_missing,
-                            pending_active_subscribers: $pa, pending_stopped_subscribers: $ps}}'
+                            pending_active_subscribers: $pa, pending_stopped_subscribers: $ps,
+                            blocked_no_email: $bne}}'
     else
         echo "=== Current Status ==="
         echo "Total Backers: $total_backers"
@@ -183,6 +199,7 @@ show_status() {
         echo "--- Synchro €→Ẑen (rattrapage 12 derniers mois) ---"
         echo "✅ Émis: $ok | ❌ Échec: $fail | ⏳ En attente: $pending | MULTIPASS manquant: $mp_missing"
         echo "   dont en attente : 🟢 $pending_active abonné(s) actif(s) ce mois-ci | 🔴 $pending_stopped abonné(s) arrêté(s)"
+        [[ "$blocked_no_email" -gt 0 ]] && echo "🚫 $blocked_no_email don(s) sans email exploitable — jamais traités par --run, à vérifier manuellement (--sync)"
         [[ "$pending" -gt 0 || "$fail" -gt 0 || "$mp_missing" -gt 0 ]] && echo "→ Détail : ./oc2uplanet.sh --sync"
     fi
 }
@@ -208,6 +225,16 @@ fetch_oc_data() {
     curl -sX POST -H "Content-Type: application/json" -H "Personal-Token: ${OCAPIKEY}" \
         -d "{\"query\": \"query (\$slug: String) { account(slug: \$slug) { name slug transactions(limit: 1000, type: CREDIT, includeChildrenTransactions: true) { totalCount nodes { type fromAccount { name slug emails } toAccount { slug name } amount { value currency } order { tier { slug name } } createdAt } } } }\", \"variables\": {\"slug\": \"${OCSLUG}\"}}" \
         "${OC_API}" > ${MY_PATH}/data/tx.json
+
+    ## Vérifie que l'API a bien répondu (pas une erreur GraphQL / réponse vide / API
+    ## down) — sinon un `--run` planifié peut "réussir" (exit 0, marqueur mensuel posé
+    ## par 20h12.process.sh) sans avoir traité la moindre transaction, silencieusement.
+    if ! jq -e '.data.account' "${MY_PATH}/data/tx.json" >/dev/null 2>&1; then
+        local _api_err
+        _api_err=$(jq -r '.errors[0].message // "réponse illisible"' "${MY_PATH}/data/tx.json" 2>/dev/null)
+        echo "ERROR 1 : réponse OpenCollective invalide — ${_api_err}" >&2
+        return 1
+    fi
 
     # Time splits
     local start_of_month=$(date -d "$(date +%Y-%m-01)" +"%Y-%m-%d")
@@ -362,28 +389,42 @@ _sync_rows() {
               created_at="${_fields[_i+3]}" tier_slug="${_fields[_i+4]}"
         local sub_status="stopped" sub_label="🔴 arrêté"
         [[ -n "${_active_slugs[$slug]:-}" ]] && sub_status="active" && sub_label="🟢 actif"
-        local email="$raw_email"
+        ## Résolution de l'email : si introuvable (compte OC anonyme, projet enfant,
+        ## absent de slug_email_map.json), le don est structurellement bloqué — aucun
+        ## moyen de contacter ou créditer qui que ce soit. On le marque distinctement
+        ## (mp_status="blocked") plutôt que de fabriquer un faux email=$slug qui le
+        ## ferait ressembler à un "en attente" ordinaire (cf. audit : ces dons étaient
+        ## silencieusement abandonnés par la boucle --run sans jamais être signalés ici).
+        local email="$raw_email" no_email=false
         [[ -z "$email" || "$email" == "null" ]] && email=$(jq -r --arg s "$slug" '.[$s] // empty' "${MY_PATH}/data/slug_email_map.json" 2>/dev/null)
-        [[ -z "$email" || "$email" == "null" ]] && email="$slug"
+        if [[ -z "$email" || "$email" == "null" ]]; then
+            no_email=true
+            email="$slug"
+        fi
 
         local _effective_email="$email"
-        _tier_matches "$tier_slug" "$TIER_SLUG_LABO" && _effective_email="${CAPTAIN_TARGET:-support@qo-op.com}"
-
-        local mp_status="not_invited" mp_label="❌ non invité" mp_g1pub_file=""
-        if [[ -f "$HOME/.zen/game/nostr/${_effective_email}/G1PUBNOSTR" ]]; then
-            mp_status="local"; mp_label="✅ local"
-            mp_g1pub_file="$HOME/.zen/game/nostr/${_effective_email}/G1PUBNOSTR"
+        local mp_status mp_label mp_g1pub_file=""
+        if [[ "$no_email" == "true" ]]; then
+            mp_status="blocked"; mp_label="🚫 email introuvable"
         else
-            local _swarm_hit
-            _swarm_hit=$(find ~/.zen/tmp/swarm -name "G1PUBNOSTR" 2>/dev/null | grep -F "/${_effective_email}/" | head -1)
-            if [[ -n "$_swarm_hit" ]]; then
-                mp_status="swarm"; mp_label="✅ swarm"
-                mp_g1pub_file="$_swarm_hit"
+            _tier_matches "$tier_slug" "$TIER_SLUG_LABO" && _effective_email="${CAPTAIN_TARGET:-support@qo-op.com}"
+
+            mp_status="not_invited"; mp_label="❌ non invité"
+            if [[ -f "$HOME/.zen/game/nostr/${_effective_email}/G1PUBNOSTR" ]]; then
+                mp_status="local"; mp_label="✅ local"
+                mp_g1pub_file="$HOME/.zen/game/nostr/${_effective_email}/G1PUBNOSTR"
             else
-                local last_invite
-                last_invite=$(grep -F "${_effective_email}:" "$INVITATION_LOG" 2>/dev/null | grep ":INVITED:" | tail -1 | awk -F: '{print $NF}')
-                if [[ -n "$last_invite" ]]; then
-                    mp_status="invited"; mp_label="📧 invité $(date -d "@$last_invite" +%d/%m 2>/dev/null)"
+                local _swarm_hit
+                _swarm_hit=$(find ~/.zen/tmp/swarm -name "G1PUBNOSTR" 2>/dev/null | grep -F "/${_effective_email}/" | head -1)
+                if [[ -n "$_swarm_hit" ]]; then
+                    mp_status="swarm"; mp_label="✅ swarm"
+                    mp_g1pub_file="$_swarm_hit"
+                else
+                    local last_invite
+                    last_invite=$(grep -F "${_effective_email}:" "$INVITATION_LOG" 2>/dev/null | grep ":INVITED:" | tail -1 | awk -F: '{print $NF}')
+                    if [[ -n "$last_invite" ]]; then
+                        mp_status="invited"; mp_label="📧 invité $(date -d "@$last_invite" +%d/%m 2>/dev/null)"
+                    fi
                 fi
             fi
         fi
@@ -440,14 +481,16 @@ show_sync() {
         printf "%-25.25s | %-10s | %-25.25s | %-10s | %-14s | %-10s | %s\n" "$email" "$amount" "$tier" "$sub" "$mp" "$zen" "$emis"
     done
     echo ""
-    local total ok fail pending pending_active pending_stopped
+    local total ok fail pending pending_active pending_stopped blocked_no_email
     total=$(echo "$rows" | jq 'length')
     ok=$(echo "$rows" | jq '[.[] | select(.emission_status=="ok")] | length')
     fail=$(echo "$rows" | jq '[.[] | select(.emission_status=="fail")] | length')
     pending=$(echo "$rows" | jq '[.[] | select(.emission_status=="pending")] | length')
     pending_active=$(echo "$rows" | jq '[.[] | select(.emission_status=="pending" and .subscriber_status=="active")] | length')
     pending_stopped=$(echo "$rows" | jq '[.[] | select(.emission_status=="pending" and .subscriber_status=="stopped")] | length')
+    blocked_no_email=$(echo "$rows" | jq '[.[] | select(.multipass_status=="blocked")] | length')
     echo "Total: $total | ✅ Émis: $ok (masqués ci-dessus) | ❌ Échec: $fail | ⏳ En attente: $pending (🟢 actifs: $pending_active | 🔴 arrêtés: $pending_stopped)"
+    [[ "$blocked_no_email" -gt 0 ]] && echo "🚫 Bloqués (email introuvable, jamais traités par --run) : $blocked_no_email — vérifier data/slug_email_map.json"
 }
 
 ## Argument parsing
@@ -497,7 +540,12 @@ fi
 [[ -z $UPLANETNAME ]] && echo "MISSING PRIVATE SWARM ACTIVATED ASTROPORT STATION" && exit 1
 [[ "${PAF}" == "0" ]] && echo "PAF=0 — station sandbox, émission ẐEN désactivée." && exit 0
 find ./data -mtime +1 -type f -exec rm '{}' \; 2>/dev/null
-[[ ! -s ${MY_PATH}/data/current_month.credit.json ]] && fetch_oc_data
+## Échec explicite (exit 1) si la récupération des données échoue — sans ça, un
+## `--run` planifié peut se déclarer "réussi" et poser le marqueur mensuel de
+## 20h12.process.sh sans avoir traité la moindre transaction.
+if [[ ! -s ${MY_PATH}/data/catchup.credit.json ]]; then
+    fetch_oc_data || { echo "❌ Échec de récupération OpenCollective — abandon, aucune émission tentée." >&2; exit 1; }
+fi
 
 ########################################################################
 ## EMISSION ẐEN
@@ -730,42 +778,8 @@ _build_station_card_html() {
 STATION_HTML
 }
 
-## Bloc HTML "reprenez votre cotisation", injecté via {{RENEWAL_NOTICE}} quand le
-## donateur ne cotise plus ce mois-ci (abonnement arrêté). Vide (rien injecté) si
-## l'abonnement est toujours actif.
-_build_renewal_notice_html() {
-    local sub_status="$1" tier_slug="$2"
-    [[ "$sub_status" != "stopped" ]] && return 0
-
-    local resume_url="https://opencollective.com/monnaie-libre/contribute"
-    if _tier_matches "$tier_slug" "$TIER_SLUG_SATELLITE"; then
-        resume_url="${OC_URL_SATELLITE:-$resume_url}"
-    elif _tier_matches "$tier_slug" "$TIER_SLUG_CONSTELLATION"; then
-        resume_url="${OC_URL_CONSTELLATION:-$resume_url}"
-    elif _tier_matches "$tier_slug" "$TIER_SLUG_CLOUD"; then
-        resume_url="${OC_URL_CLOUD:-$resume_url}"
-    fi
-
-    cat << RENEWAL_HTML
-
-  <!-- RELANCE ABONNEMENT -->
-  <div style="background:rgba(255,165,0,0.08);border-left:3px solid #ffa500;padding:16px 20px;margin-bottom:24px;border-radius:0 4px 4px 0;">
-    <h2 style="font-family:'Courier New',monospace;color:#ffa500;font-size:0.85rem;letter-spacing:2px;margin:0 0 8px;">
-      ⏸️&nbsp;COTISATION EN PAUSE
-    </h2>
-    <p style="margin:0;color:rgba(255,255,255,0.75);font-size:0.85rem;line-height:1.65;">
-      Ce don ne correspond à aucune cotisation ce mois-ci — votre abonnement semble
-      s'être arrêté depuis. Pour continuer à faire vivre la coopérative et rester à
-      jour, vous pouvez
-      <a href="${resume_url}" style="color:#ffa500;font-weight:600;">reprendre votre cotisation ici</a>.
-    </p>
-  </div>
-
-RENEWAL_HTML
-}
-
 _send_multipass_invitation() {
-    local email="$1" amount="$2" tier_slug="$3" donor_email="${4:-$1}" created_at="${5:-}" sub_status="${6:-active}"
+    local email="$1" amount="$2" tier_slug="$3" donor_email="${4:-$1}" created_at="${5:-}"
 
     ## Opt-out Mailjet : vérifier ~/.zen/game/nostr/$email/.mailjet
     local mailjet_optout="${HOME}/.zen/game/nostr/${email}/.mailjet"
@@ -797,7 +811,7 @@ _send_multipass_invitation() {
     now=$(date +%s)
     local last_ts
     last_ts=$(grep -F "${email}:" "$INVITATION_LOG" | grep ":INVITED:" | grep -oE ':[0-9]{10}$' | tail -1 | tr -d ':')
-    if [[ -n "$last_ts" ]] && (( now - last_ts < 86400 )); then
+    if [[ -n "$last_ts" ]] && (( now - last_ts < 259200 )); then
         return 0
     fi
 
@@ -873,22 +887,21 @@ _send_multipass_invitation() {
 HTMLEOF
     fi
 
-    ## Injecter la fiche station + la relance abonnement (substitution multi-ligne via Python)
-    local _card_tmpfile _renewal_tmpfile
+    ## Injecter la fiche station (substitution multi-ligne via Python). Note : cette
+    ## invitation ne s'adresse qu'à des comptes SANS MULTIPASS — pas de "reprenez votre
+    ## cotisation" ici, ce message n'a de sens que dans _send_renewal_reminder (comptes
+    ## qui ONT déjà un MULTIPASS et une vraie interruption de cotisation).
+    local _card_tmpfile
     _card_tmpfile=$(mktemp /tmp/station_card_XXXXXX.html)
-    _renewal_tmpfile=$(mktemp /tmp/renewal_notice_XXXXXX.html)
     _build_station_card_html > "$_card_tmpfile"
-    _build_renewal_notice_html "$sub_status" "$tier_slug" > "$_renewal_tmpfile"
-    python3 - "$_card_tmpfile" "$_renewal_tmpfile" "$tmp_html" << 'PYEOF' 2>/dev/null || \
-        sed -i -e 's/{{STATION_CARD}}//' -e 's/{{RENEWAL_NOTICE}}//' "$tmp_html"
+    python3 - "$_card_tmpfile" "$tmp_html" << 'PYEOF' 2>/dev/null || \
+        sed -i 's/{{STATION_CARD}}//' "$tmp_html"
 import sys
 with open(sys.argv[1], encoding='utf-8') as f: card = f.read()
-with open(sys.argv[2], encoding='utf-8') as f: renewal = f.read()
-with open(sys.argv[3], encoding='utf-8') as f: html = f.read()
-html = html.replace('{{STATION_CARD}}', card).replace('{{RENEWAL_NOTICE}}', renewal)
-with open(sys.argv[3], 'w', encoding='utf-8') as f: f.write(html)
+with open(sys.argv[2], encoding='utf-8') as f: html = f.read()
+with open(sys.argv[2], 'w', encoding='utf-8') as f: f.write(html.replace('{{STATION_CARD}}', card))
 PYEOF
-    rm -f "$_card_tmpfile" "$_renewal_tmpfile"
+    rm -f "$_card_tmpfile"
 
     if [[ -x "${ASTROPORT}/tools/mailjet.sh" ]]; then
         "${ASTROPORT}/tools/mailjet.sh" \
@@ -946,11 +959,17 @@ _send_renewal_reminder() {
         return 0
     fi
 
+    ## TIER_SLUG_CLOUD regroupe deux offres OC distinctes (cloud-usage et
+    ## membre-resident), chacune avec sa propre page de cotisation — on vérifie
+    ## "membre-resident" spécifiquement avant de retomber sur le lien CLOUD générique,
+    ## sinon un membre résident recevait le lien de la cotisation cloud-usage par erreur.
     local resume_url="https://opencollective.com/monnaie-libre/contribute"
     if _tier_matches "$tier_slug" "$TIER_SLUG_SATELLITE"; then
         resume_url="${OC_URL_SATELLITE:-$resume_url}"
     elif _tier_matches "$tier_slug" "$TIER_SLUG_CONSTELLATION"; then
         resume_url="${OC_URL_CONSTELLATION:-$resume_url}"
+    elif _tier_matches "$tier_slug" "membre-resident"; then
+        resume_url="${OC_URL_MEMBRE:-$resume_url}"
     elif _tier_matches "$tier_slug" "$TIER_SLUG_CLOUD"; then
         resume_url="${OC_URL_CLOUD:-$resume_url}"
     fi
@@ -1035,7 +1054,14 @@ for ((_i = 0; _i < ${#_fields[@]}; _i += 6)); do
 
     email="$raw_email"
     [[ -z "$email" || "$email" == "null" ]] && email=$(jq -r --arg s "$slug" '.[$s] // empty' "${MY_PATH}/data/slug_email_map.json" 2>/dev/null)
-    [[ -z "$email" || "$email" == "null" ]] && continue
+    if [[ -z "$email" || "$email" == "null" ]]; then
+        ## Don structurellement bloqué (pas d'email exploitable) : rien n'est tenté ni
+        ## journalisé, donc rien ne le distinguera d'un don "en attente" ordinaire dans
+        ## --sync sauf le statut dédié "blocked" (🚫). Signalé ici pour que ce ne soit
+        ## pas silencieux côté --run aussi.
+        [[ "$JSON_OUTPUT" == "false" ]] && echo "🚫 Don bloqué (aucun email exploitable, slug='${slug}', ${amount}€) — voir --sync"
+        continue
+    fi
 
     tx_id="${raw_email}:${amount}:${created_at}"
     _check_emission_nostr "$tx_id" && continue
@@ -1052,7 +1078,7 @@ for ((_i = 0; _i < ${#_fields[@]}; _i += 6)); do
         _swarm_hit=$(find ~/.zen/tmp/swarm -name "G1PUBNOSTR" 2>/dev/null | grep -F "/${_effective_email}/" | head -1)
         if [[ -z "$_swarm_hit" ]]; then
             [[ "$JSON_OUTPUT" == "false" ]] && echo "⚠️  MULTIPASS introuvable pour ${_effective_email} — invitation en cours"
-            _send_multipass_invitation "${_effective_email}" "${amount}" "${tier_slug}" "${email}" "${created_at}" "${sub_status}"
+            _send_multipass_invitation "${_effective_email}" "${amount}" "${tier_slug}" "${email}" "${created_at}"
         else
             [[ "$JSON_OUTPUT" == "false" ]] && echo "ℹ️  MULTIPASS de ${_effective_email} présent dans le swarm (${_swarm_hit})"
         fi
