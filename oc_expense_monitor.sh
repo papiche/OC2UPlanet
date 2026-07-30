@@ -43,13 +43,11 @@ touch "$RESTITUTION_LOG" "$REFUND_LOG"
 ## UPLANET SECRETS & API MODE
 ########################################################################
 UPLANETNAME="$(cat ~/.ipfs/swarm.key 2>/dev/null | tail -n 1)"
-ORIGIN_KEY="0000000000000000000000000000000000000000000000000000000000000000"
 
-if [[ "$UPLANETNAME" == "$ORIGIN_KEY" || -z "$UPLANETNAME" ]]; then
-    OC_API="https://api-staging.opencollective.com/graphql/v2"
-else
-    OC_API="${OC_API:-https://api.opencollective.com/graphql/v2}"
-fi
+## Pas de bascule staging en mode ORIGIN : ce collectif OpenCollective n'a pas
+## d'API staging configurée — ORIGIN reste un régime économique réel (1Ẑ=0.1Ğ1),
+## on cible toujours l'API de production, avec ou sans clé swarm.
+OC_API="${OC_API:-https://api.opencollective.com/graphql/v2}"
 
 ########################################################################
 ## uplanet.G1.dunikey — Cooperative central wallet (source for refunds)
@@ -68,7 +66,9 @@ echo "=== Monitoring OC expenses for restitution status ==="
 
 ## Query expenses with status PENDING, REJECTED, or PAID
 ## We look for expenses whose description contains RESTITUTION
-curl -sX POST \
+## --max-time : sans lui un OC API lent/rate-limité bloque ce script (cron 20h12)
+## indéfiniment, sans aucun message d'erreur pour l'expliquer (cf. oc2uplanet.sh).
+curl -sX POST --max-time 30 \
     -H "Content-Type: application/json" \
     -H "Personal-Token: ${OCAPIKEY}" \
     -d '{

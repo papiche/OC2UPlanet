@@ -63,12 +63,12 @@ Les secrets ne sont **plus** dans `.env` local. Ils sont chargés depuis le DID 
 ```bash
 OCAPIKEY="votre_personal_token_OC"
 OCSLUG="votre-slug-collectif"
-OC_API="https://api.opencollective.com/graphql/v2"  # auto-détecté (staging vs prod)
+OC_API="https://api.opencollective.com/graphql/v2"  # toujours l'API de production
 ```
 
-**Détection ORIGIN** : `cat ~/.ipfs/swarm.key | tail -n 1`
-- Vide → API production
-- Présent → API staging
+Pas de bascule staging : ce collectif OpenCollective n'a pas d'API staging configurée.
+UPlanet ORIGIN reste un régime économique réel (1Ẑ=0.1Ğ1), pas un sandbox — `oc2uplanet.sh`
+et `oc_expense_monitor.sh` ciblent toujours l'API de production, avec ou sans `~/.ipfs/swarm.key`.
 
 ## Déclenchement
 

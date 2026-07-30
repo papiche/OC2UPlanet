@@ -30,6 +30,24 @@ JSON_OUTPUT=false
 # Preliminary check for --json to silence init messages
 for arg in "$@"; do [[ "$arg" == "--json" ]] && JSON_OUTPUT=true; done
 
+########################################################################
+## Protection contre les exécutions concurrentes (pattern oc_expense_monitor.sh:16-18,
+## RUNTIME/ZEN.INVOICE.sh) — absente jusqu'ici. Un --sync complet spawn de nombreux
+## sous-process (curl OC, strfry scan par transaction du rattrapage 12 mois) ; deux
+## invocations simultanées (cron + manuel, ou double-clic sur oc_admin.html) se
+## ralentissent mutuellement au lieu de s'isoler, plutôt qu'une des deux attendant
+## simplement son tour. Couvre toutes les commandes (lecture ET --run/--manual) : même
+## les vues --status/--sync spawnent assez de sous-process pour se gêner entre elles.
+exec 200>"/tmp/oc2uplanet.lock"
+if ! flock -n 200; then
+    if [[ "$JSON_OUTPUT" == "true" ]]; then
+        echo '{"error":"oc2uplanet.sh déjà en cours d'"'"'exécution — réessayer dans quelques secondes"}'
+    else
+        echo "⏳ oc2uplanet.sh déjà en cours d'exécution — réessayer dans quelques secondes"
+    fi
+    exit 1
+fi
+
 if [[ -z "${OCAPIKEY}" && -f "${COOP_CONFIG}" ]]; then
     source "${COOP_CONFIG}" 2>/dev/null
     _coop_ocapikey=$(coop_config_get "OCAPIKEY" 2>/dev/null)
@@ -95,6 +113,39 @@ _zen_balance() {
     local g1pub="$1"
     [[ -z "$g1pub" || ! -x "${ASTROPORT}/tools/G1check.sh" ]] && return
     "${ASTROPORT}/tools/G1check.sh" "${g1pub}:ZEN" 2>/dev/null | tail -n 1
+}
+
+## Préchargement des preuves d'émission NOSTR (kind 30851, #t=oc-emission) — UN SEUL
+## `strfry scan` au lieu d'un scan PAR transaction. C'était le principal goulot de perf
+## de --sync/--run en pratique (~63 comptes × plusieurs sous-process chacun, dont ce scan) :
+## recoupement en mémoire (bash associatif) plutôt qu'un aller-retour au relay par ligne.
+## À appeler UNE FOIS avant toute boucle qui traite les transactions (_sync_rows, --run).
+## Définies ICI (tout en haut du script) et non près de _check_emission_nostr plus bas :
+## show_status/show_sync (qui appellent _sync_rows) sont dispatchées AVANT que le script
+## n'atteigne la zone où vivait _check_emission_nostr — une définition plus bas serait
+## encore non résolue au moment de l'appel (bash exécute top-to-bottom, une fonction
+## n'existe qu'une fois la ligne `nom() { ... }` réellement atteinte).
+declare -A EMITTED_STATUS=()
+_prefetch_emission_status() {
+    declare -gA EMITTED_STATUS=()
+    [[ -x "$HOME/.zen/strfry/strfry" ]] || return 0
+    local d s
+    while IFS=$'\t' read -r d s; do
+        [[ -n "$d" ]] && EMITTED_STATUS["$d"]="$s"
+    done < <(cd "$HOME/.zen/strfry" && ./strfry scan '{"kinds":[30851],"#t":["oc-emission"]}' 2>/dev/null \
+        | jq -r '[(.tags[]|select(.[0]=="d")|.[1]), ((.tags[]|select(.[0]=="s")|.[1])//"")] | @tsv' 2>/dev/null)
+}
+
+## Préchargement des chemins G1PUBNOSTR du swarm — UN SEUL `find` au lieu d'un `find`
+## (parcours de tout l'arbre swarm) par transaction dont le MULTIPASS n'est pas local.
+declare -A SWARM_G1PUBNOSTR=()
+_prefetch_swarm_g1pubnostr() {
+    declare -gA SWARM_G1PUBNOSTR=()
+    local f email
+    while IFS= read -r f; do
+        email=$(basename "$(dirname "$f")")
+        SWARM_G1PUBNOSTR["$email"]="$f"
+    done < <(find ~/.zen/tmp/swarm -name "G1PUBNOSTR" 2>/dev/null)
 }
 
 ## Station variables (CAPTAINEMAIL, uSPOT, myDOMAIN, myIPFS…)
@@ -208,8 +259,10 @@ fetch_oc_data() {
     [[ -z "${OCAPIKEY}" ]] && echo "ERROR 0 : OCAPIKEY manquant" && return 1
     [[ "$JSON_OUTPUT" == "false" ]] && echo "Fetching data from OpenCollective for slug: ${OCSLUG}..."
     
-    # Backers list
-    curl -sX POST -H "Content-Type: application/json" -H "Personal-Token: ${OCAPIKEY}" \
+    # Backers list — --max-time : sans lui un OC API lent/rate-limité bloque tout
+    # invocateur (cron mensuel, appel manuel, route UPassport /api/oc_admin/contributions)
+    # indéfiniment, sans aucun message d'erreur pour l'expliquer.
+    curl -sX POST --max-time 30 -H "Content-Type: application/json" -H "Personal-Token: ${OCAPIKEY}" \
         -d "{\"query\": \"query account(\$slug: String) { account(slug: \$slug) { name slug members(role: BACKER, limit: 200) { totalCount nodes { account { name slug emails } } } } }\", \"variables\": {\"slug\": \"${OCSLUG}\"}}" \
         "${OC_API}" > ${MY_PATH}/data/backers.json
 
@@ -222,7 +275,7 @@ fetch_oc_data() {
     # sous monnaie-libre) : sans ce flag, Account.transactions ne retourne QUE les
     # transactions dont toAccount == ce slug précis, jamais celles des projets enfants
     # (vérifié empiriquement : 480 tx sans le flag, 484 avec — 4 tx enfants invisibles).
-    curl -sX POST -H "Content-Type: application/json" -H "Personal-Token: ${OCAPIKEY}" \
+    curl -sX POST --max-time 30 -H "Content-Type: application/json" -H "Personal-Token: ${OCAPIKEY}" \
         -d "{\"query\": \"query (\$slug: String) { account(slug: \$slug) { name slug transactions(limit: 1000, type: CREDIT, includeChildrenTransactions: true) { totalCount nodes { type fromAccount { name slug emails } toAccount { slug name } amount { value currency } order { tier { slug name } } createdAt } } } }\", \"variables\": {\"slug\": \"${OCSLUG}\"}}" \
         "${OC_API}" > ${MY_PATH}/data/tx.json
 
@@ -375,6 +428,11 @@ _sync_rows() {
     local -a _fields
     readarray -d '' -t _fields < <(python3 "${MY_PATH}/tx_fields.py" "${MY_PATH}/data/catchup.credit.json" 2>/dev/null)
 
+    ## Préchargement (1 seul scan/find pour TOUTES les lignes, cf. définitions ci-dessus) —
+    ## remplace ce qui était, avant correctif, un `strfry scan` + un `find` PAR ligne.
+    _prefetch_emission_status
+    _prefetch_swarm_g1pubnostr
+
     ## Comptes ayant contribué CE mois-ci (cotisation en cours) — sert à distinguer
     ## les dons en attente d'un abonné toujours actif de ceux d'un abonné qui a arrêté.
     local -A _active_slugs=()
@@ -414,8 +472,7 @@ _sync_rows() {
                 mp_status="local"; mp_label="✅ local"
                 mp_g1pub_file="$HOME/.zen/game/nostr/${_effective_email}/G1PUBNOSTR"
             else
-                local _swarm_hit
-                _swarm_hit=$(find ~/.zen/tmp/swarm -name "G1PUBNOSTR" 2>/dev/null | grep -F "/${_effective_email}/" | head -1)
+                local _swarm_hit="${SWARM_G1PUBNOSTR[$_effective_email]:-}"
                 if [[ -n "$_swarm_hit" ]]; then
                     mp_status="swarm"; mp_label="✅ swarm"
                     mp_g1pub_file="$_swarm_hit"
@@ -437,10 +494,7 @@ _sync_rows() {
         fi
 
         local tx_id="${raw_email}:${amount}:${created_at}"
-        local _rec_s=""
-        if [[ -x "$HOME/.zen/strfry/strfry" ]]; then
-            _rec_s=$(cd "$HOME/.zen/strfry" && ./strfry scan "{\"kinds\":[30851],\"#d\":[\"oc-emission-${tx_id}\"]}" 2>/dev/null | jq -r '.tags[]? | select(.[0]=="s") | .[1]' 2>/dev/null | head -1)
-        fi
+        local _rec_s="${EMITTED_STATUS[oc-emission-${tx_id}]:-}"
         [[ -z "$_rec_s" ]] && _rec_s=$(grep -F "$tx_id" "$EMISSION_LOG" 2>/dev/null | tail -1 | awk -F: '{print $NF}')
         local emis_status="pending" emis_label="⏳ en attente"
         case "$_rec_s" in
@@ -580,9 +634,14 @@ _init_captain_nostr_key() {
     echo "NSEC=$_nsec;" > "$CAPTAIN_NOSTR_KEYFILE"
 }
 
-## Vérification idempotence via relay local (kind 30851) avec fallback emission.log
+## Vérification idempotence via relay local (kind 30851) avec fallback emission.log.
+## Chemin rapide : consulte EMITTED_STATUS (préchargé par _prefetch_emission_status) —
+## O(1), pas de sous-process. Repli sur un scan ciblé si le préchargement n'a pas eu
+## lieu (appel isolé de cette fonction hors _sync_rows()/--run), pour rester utilisable
+## seule sans régression de comportement.
 _check_emission_nostr() {
     local tx_d="oc-emission-${1}"
+    [[ -n "${EMITTED_STATUS[$tx_d]+_}" ]] && return 0
     local found=0
     if [[ -x "$HOME/.zen/strfry/strfry" ]]; then
         found=$(cd "$HOME/.zen/strfry" && \
@@ -1040,6 +1099,10 @@ _send_renewal_reminder() {
 declare -a _fields
 readarray -d '' -t _fields < <(python3 "${MY_PATH}/tx_fields.py" "${MY_PATH}/data/catchup.credit.json" 2>/dev/null)
 
+## Préchargement (1 seul scan/find pour TOUTES les lignes) — voir _sync_rows() pour le détail.
+_prefetch_emission_status
+_prefetch_swarm_g1pubnostr
+
 ## Comptes ayant contribué CE mois-ci — voir _sync_rows() pour le détail.
 declare -A _active_slugs=()
 while IFS= read -r _s; do
@@ -1075,7 +1138,7 @@ for ((_i = 0; _i < ${#_fields[@]}; _i += 6)); do
 
     ## Vérification MULTIPASS : local d'abord, puis swarm
     if [[ ! -f "$HOME/.zen/game/nostr/${_effective_email}/G1PUBNOSTR" ]]; then
-        _swarm_hit=$(find ~/.zen/tmp/swarm -name "G1PUBNOSTR" 2>/dev/null | grep -F "/${_effective_email}/" | head -1)
+        _swarm_hit="${SWARM_G1PUBNOSTR[$_effective_email]:-}"
         if [[ -z "$_swarm_hit" ]]; then
             [[ "$JSON_OUTPUT" == "false" ]] && echo "⚠️  MULTIPASS introuvable pour ${_effective_email} — invitation en cours"
             _send_multipass_invitation "${_effective_email}" "${amount}" "${tier_slug}" "${email}" "${created_at}"
