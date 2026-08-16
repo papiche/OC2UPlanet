@@ -462,11 +462,15 @@ _sync_rows() {
 
         local _effective_email="$email"
         local mp_status mp_label mp_g1pub_file=""
+        local wallet_zen=""
         if [[ "$no_email" == "true" ]]; then
             mp_status="blocked"; mp_label="🚫 email introuvable"
+        elif _tier_matches "$tier_slug" "$TIER_SLUG_LABO"; then
+            ## Tier labo/R&D : destination = wallet coopératif R&D (UPLANETNAME_RND),
+            ## toujours disponible (dérivé de la clé swarm) — pas de MULTIPASS à vérifier.
+            mp_status="local"; mp_label="🏦 wallet R&D (officiel)"
+            wallet_zen=$(_zen_balance "${UPLANETNAME_RND}")
         else
-            _tier_matches "$tier_slug" "$TIER_SLUG_LABO" && _effective_email="${CAPTAIN_TARGET:-support@qo-op.com}"
-
             mp_status="not_invited"; mp_label="❌ non invité"
             if [[ -f "$HOME/.zen/game/nostr/${_effective_email}/G1PUBNOSTR" ]]; then
                 mp_status="local"; mp_label="✅ local"
@@ -486,7 +490,6 @@ _sync_rows() {
             fi
         fi
 
-        local wallet_zen=""
         if [[ -n "$mp_g1pub_file" ]]; then
             local _g1pub
             _g1pub=$(cat "$mp_g1pub_file" 2>/dev/null)
@@ -711,10 +714,17 @@ dispatch_zen_emission() {
         ${ASTROPORT}/UPLANET.official.sh -s "${email}" -t constellation -m "${zen_amount}"
         return $?
     elif _tier_matches "$tier_slug" "$TIER_SLUG_LABO"; then
-        ## Dons fléchés vers le MULTIPASS du Capitaine (labo / R&D qo-op)
-        local cap="${CAPTAIN_TARGET:-support@qo-op.com}"
-        [[ "$JSON_OUTPUT" == "false" ]] && echo "→ Tier labo/R&D : routage vers MULTIPASS capitaine ${cap}"
-        ${ASTROPORT}/UPLANET.official.sh -l "${cap}" -m "${zen_amount}"
+        ## Dons fléchés vers le portefeuille coopératif R&D (UPLANETNAME_RND), PAS vers
+        ## le MULTIPASS personnel du Capitaine — même schéma que l'allocation 1/3 R&D de
+        ## ZEN.COOPERATIVE.3x1-3.sh (PAYforSURE.sh direct depuis la banque G1 vers RND).
+        if [[ -z "${UPLANETNAME_RND:-}" ]]; then
+            echo "ERROR:UPLANETNAME_RND non configuré — impossible de créditer le wallet R&D" >&2
+            return 1
+        fi
+        local rnd_g1=$(echo "scale=2; ${zen_amount} / 10" | bc)
+        [[ "$JSON_OUTPUT" == "false" ]] && echo "→ Tier labo/R&D : ${zen_amount} Ẑen (${rnd_g1} Ğ1) versés au wallet coopératif R&D"
+        "${ASTROPORT}/tools/PAYforSURE.sh" "$HOME/.zen/game/uplanet.G1.dunikey" "${rnd_g1}" "${UPLANETNAME_RND}" \
+            "UPLANET:${UPLANETG1PUB:0:8}:RnD:OC-DON:${email}"
         return $?
     else
         ${ASTROPORT}/UPLANET.official.sh -l "${email}" -m "${zen_amount}"
@@ -1132,9 +1142,29 @@ for ((_i = 0; _i < ${#_fields[@]}; _i += 6)); do
     [[ "$JSON_OUTPUT" == "false" && -n "$to_project" && "$to_project" != "$OCSLUG" ]] && \
         echo "🌱 Contribution au projet enfant '${to_project}' (tier: ${tier_slug:-?}) — ${email} : ${amount}€"
 
-    ## Routage des tiers labo/R&D : l'email cible est le Capitaine, pas le donateur
+    ## Routage des tiers labo/R&D : virement direct au wallet coopératif R&D
+    ## (UPLANETNAME_RND), toujours disponible (dérivé de la clé swarm) — aucune
+    ## vérification MULTIPASS/invitation ne s'applique à ce tier (cf. dispatch_zen_emission).
+    if _tier_matches "$tier_slug" "$TIER_SLUG_LABO"; then
+        if [[ "$MANUAL_MODE" == "true" ]]; then
+            echo "------------------------------------------------"
+            echo "Transaction: $email | Amount: $amount EUR | Tier: ${tier_slug:-standard}"
+            echo "   → Tier labo/R&D : versement direct au wallet coopératif R&D"
+            read -p "Process? [Y/n/skip/exit]: " choice
+            case "${choice,,}" in
+                skip|n|no) continue ;;
+                exit) exit 0 ;;
+            esac
+        fi
+        dispatch_zen_emission "${email}" "${amount}" "${tier_slug}"
+        _dispatch_rc=$?
+        _dispatch_status="FAIL"
+        [[ $_dispatch_rc -eq 0 ]] && _dispatch_status="OK"
+        _publish_emission_proof "$email" "$amount" "$tier_slug" "$raw_email" "$created_at" "$_dispatch_status"
+        continue
+    fi
+
     _effective_email="$email"
-    _tier_matches "$tier_slug" "$TIER_SLUG_LABO" && _effective_email="${CAPTAIN_TARGET:-support@qo-op.com}"
 
     ## Vérification MULTIPASS : local d'abord, puis swarm
     if [[ ! -f "$HOME/.zen/game/nostr/${_effective_email}/G1PUBNOSTR" ]]; then
@@ -1148,21 +1178,14 @@ for ((_i = 0; _i < ${#_fields[@]}; _i += 6)); do
         continue
     fi
 
-    ## MULTIPASS déjà créé mais abonnement arrêté (ne cotise plus ce mois-ci) : relance
-    ## dédiée, distincte de l'invitation MULTIPASS ci-dessus. Ne concerne pas les tiers
-    ## labo/R&D (redirigés vers le Capitaine — la notion d'abonnement ne s'y applique pas).
-    if [[ "$sub_status" == "stopped" ]] && ! _tier_matches "$tier_slug" "$TIER_SLUG_LABO"; then
+    ## MULTIPASS déjà créé mais abonnement arrêté (ne cotise plus ce mois-ci) : relance dédiée.
+    if [[ "$sub_status" == "stopped" ]]; then
         _send_renewal_reminder "${_effective_email}" "${tier_slug}" "${amount}" "${created_at}"
     fi
 
     if [[ "$MANUAL_MODE" == "true" ]]; then
         echo "------------------------------------------------"
         echo "Transaction: $email | Amount: $amount EUR | Tier: ${tier_slug:-standard}"
-        ## Tiers labo/R&D : le don ne recharge PAS le wallet du donateur mais celui du
-        ## Capitaine (cf. dispatch_zen_emission) — le préciser pour éviter toute confusion
-        ## avec un donateur dont le MULTIPASS personnel n'existe pas encore.
-        [[ "$_effective_email" != "$email" ]] && \
-            echo "   → Tier labo/R&D : redirigé vers le MULTIPASS Capitaine (${_effective_email})"
         read -p "Process? [Y/n/edit/skip/exit]: " choice
         case "${choice,,}" in
             y|yes|"") dispatch_zen_emission "${email}" "${amount}" "${tier_slug}" ;;

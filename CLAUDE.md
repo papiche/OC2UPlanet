@@ -17,9 +17,17 @@ Chaque versement CREDIT sur OpenCollective déclenche l'émission de ẐEN équi
 | Constellation (540€/an) | `parrainage-infrastructure-module-gpu-1-24` | `process_societaire` | ZEN Card → répartition SCIC 33/33/33/1 |
 | Cloud usage | `cotisation-services-cloud-usage` | `process_locataire` | Recharge MULTIPASS immédiate |
 | Membre résident | `membre-resident-soutien-mensuel` | `process_locataire` | Recharge MULTIPASS mensuelle |
+| Labo / R&D | `infrastructure,labo,genereux-donateur,r-d,recherche` | `PAYforSURE.sh` direct | **Wallet coopératif `UPLANETNAME_RND`** (jamais le MULTIPASS personnel du Capitaine) |
 
 **Note :** Les sociétaires (Satellite/Constellation) ne rechargent pas le MULTIPASS.
 Le MULTIPASS reçoit son crédit initial à la création (`make_NOSTRCARD.sh` → PRIMO TX 1Ğ1).
+
+**Tier labo/R&D — conformité** : ces dons sont versés directement au portefeuille coopératif
+`UPLANETNAME_RND` (`~/.zen/game/uplanet.G1.dunikey` → `UPLANETNAME_RND`, cf. `dispatch_zen_emission()`
+dans `oc2uplanet.sh`), et non au MULTIPASS personnel du Capitaine (`CAPTAINEMAIL`) — même schéma
+que l'allocation 1/3 R&D de `RUNTIME/ZEN.COOPERATIVE.3x1-3.sh` d'Astroport.ONE. Aucune vérification
+MULTIPASS/invitation ne s'applique à ce tier : le wallet R&D est toujours disponible (dérivé de la
+clé swarm), sans notion d'abonné.
 
 **Routage configurable** : le slug ci-dessus n'est qu'un exemple par défaut. La correspondance
 slug → catégorie (satellite/constellation/labo/cloud) est pilotée par les clés
