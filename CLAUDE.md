@@ -91,6 +91,8 @@ cd ~/.zen/workspace/OC2UPlanet
 ./oc2uplanet.sh --status       # Résumé du mois courant + synchro OK/FAIL/pending (12 mois)
 ./oc2uplanet.sh --scan         # Lister tous les backers et contributions
 ./oc2uplanet.sh --ranking      # Classement par contribution + statut actif
+./oc2uplanet.sh --parrain-ranking  # Classement des parrains sociétaires (tiers Satellite/Constellation),
+                                    # pseudonymisé (sans email) — alimente /api/parrains_ranking (public)
 ./oc2uplanet.sh --alerts       # Abonnements arrêtés ou modifiés
 ./oc2uplanet.sh --history      # 20 dernières transactions traitées
 ./oc2uplanet.sh --json         # Sortie JSON machine-readable (combinable avec les options ci-dessus)

@@ -166,6 +166,8 @@ show_help() {
     echo "  --status    Résumé du mois courant + synchro OK/FAIL/pending sur 12 mois [= défaut]"
     echo "  --scan      List all backers and their contributions"
     echo "  --ranking   Rank backers by total contribution + active status"
+    echo "  --parrain-ranking  Classement des parrains sociétaires (tiers Satellite/Constellation),"
+    echo "                     pseudonymisé (sans email) — alimente la page publique parrains.html"
     echo "  --alerts    Identify stopped or changed subscriptions"
     echo "  --history   Show the last processed transactions"
     echo ""
@@ -368,6 +370,64 @@ show_ranking() {
     fi
 }
 
+## Classement des parrains sociétaires (tiers infra Satellite/Constellation, cf.
+## TIER_SLUG_SATELLITE/CONSTELLATION) — variante PUBLIQUE de show_ranking() :
+## alimente la route publique /api/parrains_ranking (UPassport) affichée sur
+## UPlanet/earth, donc jamais d'email en sortie, uniquement un pseudonyme
+## (prénom + initiale du nom).
+show_parrain_ranking() {
+    fetch_oc_data || return 1
+
+    ## _tier_matches gère les globs (ex. "*parrainage*128*") : filtrage fait en
+    ## bash, jq ne sachant pas interpréter ces motifs.
+    local all_tier_slugs matched_slugs=() s
+    all_tier_slugs=$(jq -r '.data.account.transactions.nodes[].order.tier.slug // empty' "${MY_PATH}/data/tx.json" | sort -u)
+    while IFS= read -r s; do
+        [[ -z "$s" ]] && continue
+        if _tier_matches "$s" "$TIER_SLUG_SATELLITE" || _tier_matches "$s" "$TIER_SLUG_CONSTELLATION"; then
+            matched_slugs+=("$s")
+        fi
+    done <<< "$all_tier_slugs"
+
+    local matched_json
+    matched_json=$(printf '%s\n' "${matched_slugs[@]}" | jq -R 'select(length > 0)' | jq -s .)
+
+    local rank_cmd='
+        . as $slugs
+        | $tx[0].data.account.transactions.nodes
+        | map(select(.order.tier.slug as $t | $slugs | index($t)))
+        | group_by(.fromAccount.slug)
+        | map({
+            display_name: (
+                (.[0].fromAccount.name // .[0].fromAccount.slug) as $n
+                | ($n | split(" ") | map(select(length > 0))) as $parts
+                | if ($parts | length) > 1
+                  then ($parts[0] + " " + ($parts[-1][0:1]) + ".")
+                  else $n end
+              ),
+            tier: .[0].order.tier.name,
+            total: (map(.amount.value) | add),
+            currency: .[0].amount.currency,
+            count: length
+          })
+        | sort_by(-.total)
+        | to_entries | map(.value + {rank: (.key + 1)})'
+
+    local result_json
+    result_json=$(jq --slurpfile tx "${MY_PATH}/data/tx.json" "$rank_cmd" <<< "$matched_json")
+
+    if [[ "$JSON_OUTPUT" == "true" ]]; then
+        echo "$result_json"
+    else
+        echo "=== Classement des Parrains (tiers parrainage-infrastructure) ==="
+        printf "%-4s | %-25s | %-20s | %-10s | %s\n" "Rang" "Nom" "Tier" "Total" "Nb dons"
+        echo "-------------------------------------------------------------------------------"
+        echo "$result_json" | jq -r '.[] | "\(.rank):\(.display_name):\(.tier):\(.total) \(.currency):\(.count)"' | while IFS=: read -r rank name tier total count; do
+            printf "%-4s | %-25.25s | %-20.20s | %-10s | %s\n" "$rank" "$name" "$tier" "$total" "$count"
+        done
+    fi
+}
+
 show_alerts() {
     fetch_oc_data || return 1
     local slugs_last=$(jq -r '.fromAccount.slug' ${MY_PATH}/data/last_month.credit.json | sort -u)
@@ -559,6 +619,7 @@ while [[ "$#" -gt 0 ]]; do
         --run) RUN_MODE=true ;;
         --scan) ACTION="scan" ;;
         --ranking) ACTION="ranking" ;;
+        --parrain-ranking) ACTION="parrain-ranking" ;;
         --alerts) ACTION="alerts" ;;
         --status) ACTION="status" ;;
         --sync) ACTION="sync" ;;
@@ -574,6 +635,7 @@ if [[ -n "$ACTION" ]]; then
     case "$ACTION" in
         scan) show_scan ;;
         ranking) show_ranking ;;
+        parrain-ranking) show_parrain_ranking ;;
         alerts) show_alerts ;;
         status) show_status ;;
         sync) show_sync ;;
