@@ -47,9 +47,8 @@ OC2UPlanet/
 ├── data/                  ← Données runtime (NON versionné)
 │   ├── backers.json           ← Cache liste des membres OC
 │   ├── tx.json                ← Transactions récupérées (GraphQL, jusqu'à 1000)
-│   ├── current_month.credit.json  ← Crédits du mois courant (info/alerts/ranking)
-│   ├── last_month.credit.json     ← Crédits du mois précédent (info/alerts)
-│   ├── catchup.credit.json        ← Crédits des 12 derniers mois (source réelle de --sync/--status/--run)
+│   ├── current_month.credit.json  ← Crédits du mois courant (source réelle de --sync/--status/--run)
+│   ├── last_month.credit.json     ← Crédits du mois précédent (alerts + détection abonnés arrêtés)
 │   ├── yesterday.credit.json      ← Crédits du jour précédent
 │   ├── emission.log               ← Journal d'idempotence (format: email:montant:tier:ts:status)
 │   ├── expenses.json              ← Dépenses OC
@@ -87,8 +86,8 @@ Marqueur d'idempotence mensuel : `~/.zen/game/.oc2uplanet_monthly.done`
 ```bash
 cd ~/.zen/workspace/OC2UPlanet
 ./oc2uplanet.sh                # Vue synthétique (= --status), AUCUNE émission Ẑen
-./oc2uplanet.sh --sync         # Détail par compte (rattrapage 12 mois) : montant, tier, MULTIPASS, statut émission
-./oc2uplanet.sh --status       # Résumé du mois courant + synchro OK/FAIL/pending (12 mois)
+./oc2uplanet.sh --sync         # Détail par compte (mois courant) : montant, tier, MULTIPASS, statut émission
+./oc2uplanet.sh --status       # Résumé du mois courant + synchro OK/FAIL/pending
 ./oc2uplanet.sh --scan         # Lister tous les backers et contributions
 ./oc2uplanet.sh --ranking      # Classement par contribution + statut actif
 ./oc2uplanet.sh --parrain-ranking  # Classement des parrains sociétaires (tiers Satellite/Constellation),
@@ -97,19 +96,24 @@ cd ~/.zen/workspace/OC2UPlanet
 ./oc2uplanet.sh --history      # 20 dernières transactions traitées
 ./oc2uplanet.sh --json         # Sortie JSON machine-readable (combinable avec les options ci-dessus)
 
-./oc2uplanet.sh --run          # Traite le rattrapage 12 mois et ÉMET les Ẑen (usage cron)
+./oc2uplanet.sh --run          # Traite le mois courant et ÉMET les Ẑen (usage cron)
 ./oc2uplanet.sh --manual       # Comme --run, en mode interactif validation/édition
 ```
 
-## Rattrapage des MULTIPASS créés tardivement
+## Relance des abonnés arrêtés
 
-`--sync`/`--status`/`--run` traitent désormais `data/catchup.credit.json` (12 derniers
-mois, pas seulement le mois courant) : un don OC dont le MULTIPASS n'a été créé que des
-semaines après l'inscription est ainsi automatiquement rattrapé au run suivant, sans
-jamais rejouer un don déjà émis (idempotence). La fenêtre est volontairement bornée à un
-an : au-delà, le traitement d'un don ancien doit être validé manuellement, car son
-éventuelle compensation par un autre canal (hors pipeline) ne peut pas être vérifiée
-automatiquement.
+`--run`/`--manual` comparent chaque mois `data/current_month.credit.json` à
+`data/last_month.credit.json` (même logique que `--alerts` : `comm -23` sur les slugs
+OC) pour repérer les comptes qui cotisaient le mois dernier et ne cotisent plus ce
+mois-ci. Pour chaque abonné arrêté disposant déjà d'un MULTIPASS local, un email de
+relance est envoyé (`_send_renewal_reminder`, template `templates/reminder_resume.html`)
+avec un lien de reprise de cotisation adapté au tier — au plus une fois tous les 30 jours
+par email (`data/invitation.log`, marqueur `REMINDED`).
+
+**Pas de fenêtre de rattrapage** : seul le mois courant est traité. Un don OC dont le
+MULTIPASS n'a été créé que plusieurs mois après l'inscription n'est plus rattrapé
+automatiquement — `--sync` reste le point d'entrée pour repérer et traiter ces cas
+manuellement.
 
 ## Idempotence
 
